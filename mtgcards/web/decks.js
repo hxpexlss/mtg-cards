@@ -13,10 +13,12 @@ function showTab(tab) {
   $("#collection-view").classList.toggle("hidden", tab !== "collection");
   $("#decks-view").classList.toggle("hidden", tab !== "decks");
   $("#stats-view").classList.toggle("hidden", tab !== "stats");
+  $("#wish-view").classList.toggle("hidden", tab !== "wishlist");
   $(".searchbox").style.visibility = tab === "collection" ? "" : "hidden";
   store("mtg-tab", tab);
   if (tab === "decks") loadDecks();
   if (tab === "stats" && typeof loadStats === "function") loadStats();
+  if (tab === "wishlist" && typeof loadWishlist === "function") loadWishlist();
 }
 
 function decksVisible() { return !$("#decks-view").classList.contains("hidden"); }
@@ -75,6 +77,7 @@ function renderDeck(d) {
       <span class="spacer"></span>
       <button class="btn small" data-dact="import">⇩ Liste einfügen</button>
       <button class="btn small" data-dact="missing">Fehlende kopieren</button>
+      ${st.missing ? `<button class="btn small" data-dact="towish">Fehlende → Wunschliste</button>` : ""}
       <a class="btn small" href="/api/decks/${d.id}/export?token=${t}" download="${esc(d.name)}.txt">Exportieren</a>
       <button class="btn small" data-dact="rename">Umbenennen</button>
       <button class="btn small danger" data-dact="delete">Löschen</button>
@@ -186,6 +189,14 @@ async function deckAction(act) {
       try { await navigator.clipboard.writeText(text); toast("Fehlende Karten in die Zwischenablage kopiert", "ok"); }
       catch (_) { /* Zwischenablage nicht erlaubt */ }
       showText(`Fehlende Karten – ${d.name}`, text);
+    } catch (e) { toast(e.message, "err"); }
+  }
+  if (act === "towish") {
+    toast("Suche günstigste Drucke …");
+    try {
+      const r = await api(`/api/decks/${d.id}/to-wishlist`, { method: "POST" });
+      toast(`${r.added.length} Karten auf die Wunschliste gesetzt`, "ok");
+      if (typeof refreshWishBadge === "function") refreshWishBadge();
     } catch (e) { toast(e.message, "err"); }
   }
   if (act === "rename") {
@@ -308,12 +319,14 @@ function bindDecks() {
     pv.style.left = Math.min(e.clientX + 24, innerWidth - 260) + "px";
     pv.style.top = Math.max(10, Math.min(e.clientY - 120, innerHeight - 350)) + "px";
   });
-  if (["decks", "stats"].includes(store("mtg-tab"))) setTimeout(() => showTab(store("mtg-tab")), 0);
+  if (["decks", "stats", "wishlist"].includes(store("mtg-tab"))) setTimeout(() => showTab(store("mtg-tab")), 0);
 }
 
 function onRevisionChange() {
   if (decksVisible() && decks.current) openDeck(decks.current.id);
   if (!$("#stats-view").classList.contains("hidden") && typeof loadStats === "function") loadStats();
+  if (!$("#wish-view").classList.contains("hidden") && typeof loadWishlist === "function") loadWishlist();
+  else if (typeof refreshWishBadge === "function") refreshWishBadge();
 }
 
 bindDecks();

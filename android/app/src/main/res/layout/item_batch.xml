@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingVertical="6dp">
+
+    <ImageView
+        android:id="@+id/bImage"
+        android:layout_width="44dp"
+        android:layout_height="61dp"
+        android:contentDescription="Kartenbild"
+        android:scaleType="fitCenter" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/bName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/bSub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/bFoil"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:text="Foil"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/bMinus"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:text="−" />
+
+    <TextView
+        android:id="@+id/bQty"
+        android:layout_width="34dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/bPlus"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:text="+" />
+</LinearLayout>

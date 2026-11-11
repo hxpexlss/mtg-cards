@@ -1,0 +1,119 @@
+"use strict";
+/* MTG Cards – Wunschliste */
+
+const wish = { items: [] };
+const fmtEur = (v) => v == null ? "–" : v.toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+
+async function loadWishlist() {
+  let r;
+  try { r = await api("/api/wishlist"); } catch (e) { return toast(e.message, "err"); }
+  wish.items = r.items;
+  setWishBadge(r.alerts);
+  renderWishlist(r);
+}
+
+function setWishBadge(n) {
+  const b = $('.tabs button[data-tab="wishlist"]');
+  if (b) b.innerHTML = `Wunschliste${n ? ` <span class="badge-n" title="Zielpreis erreicht">${n}</span>` : ""}`;
+}
+
+async function refreshWishBadge() {
+  try { setWishBadge((await api("/api/wishlist")).alerts); } catch (_) { /* egal */ }
+}
+
+function renderWishlist(r) {
+  const box = $("#wish-main");
+  box.innerHTML = `
+    <div class="deck-head">
+      <h2>Wunschliste</h2>
+      <span class="muted">${r.items.length} Karten · aktuell ${esc(fmtEur(r.total_eur))}</span>
+      <span class="spacer"></span>
+      <button class="btn small" data-wact="refresh">⟳ Preise prüfen</button>
+    </div>
+    <form class="wish-add" id="wish-add" autocomplete="off">
+      <input id="wish-name" list="wish-ac" placeholder="Karte (Name) …" required>
+      <datalist id="wish-ac"></datalist>
+      <input id="wish-qty" type="number" min="1" value="1" title="Anzahl" style="width:70px">
+      <input id="wish-max" placeholder="Zielpreis €" title="Hinweis, sobald der Preis darunter fällt" style="width:120px">
+      <label class="check" style="margin:0"><input type="checkbox" id="wish-foil"> Foil</label>
+      <button class="btn primary">＋ Wünschen</button>
+    </form>
+    <p class="muted small">Preise werden täglich geprüft (günstigster Druck, Cardmarket-Trend). Sobald eine Karte den Zielpreis
+      erreicht, wird sie markiert und die Handy-App meldet sich. Scannst du eine gewünschte Karte ein, wird der Wunsch automatisch erfüllt.</p>
+    ${r.items.length ? `<table class="list wish-table"><thead><tr>
+      <th></th><th>Karte</th><th>Anzahl</th><th>Zielpreis</th><th>Aktuell</th><th>Status</th><th></th></tr></thead><tbody>
+      ${r.items.map((w) => `<tr data-wid="${w.id}" class="${w.target_reached ? "reached" : ""}">
+        <td>${w.image_url ? `<img class="thumb" src="${esc(w.image_url)}" alt="" data-img="${esc(w.image_url)}">` : ""}</td>
+        <td><b>${esc(w.name)}</b>${w.foil ? " ✦" : ""}
+          <div class="muted small">${w.any_print ? "beliebiger Druck" : esc(w.set_code + " #" + w.collector_number)}${w.notes ? " · " + esc(w.notes) : ""}${w.owned ? ` · ${w.owned} bereits in der Sammlung` : ""}</div></td>
+        <td><span class="qty"><button class="btn small" data-wop="dec">−</button><b>${w.quantity}</b><button class="btn small" data-wop="inc">＋</button></span></td>
+        <td><input class="wish-target" value="${w.max_price_eur == null ? "" : String(w.max_price_eur).replace(".", ",")}" placeholder="–" style="width:90px"> €</td>
+        <td>${esc(fmtEur(w.price_eur))}${w.price_set && w.any_print ? `<div class="muted small">${esc(w.price_set)}</div>` : ""}</td>
+        <td>${w.target_reached ? `<span class="pill ok">✓ Zielpreis erreicht</span>` : (w.max_price_eur != null && w.price_eur != null
+          ? `<span class="muted small">noch ${esc(fmtEur(w.price_eur - w.max_price_eur))}</span>` : "")}</td>
+        <td><button class="btn small danger" data-wop="del" title="Entfernen">✕</button></td>
+      </tr>`).join("")}</tbody></table>`
+      : `<div class="empty"><p>Noch keine Wünsche. Karten oben eintragen – oder im Deck „Fehlende → Wunschliste“.</p></div>`}`;
+}
+
+async function wishOp(id, op) {
+  const w = wish.items.find((x) => x.id === +id);
+  try {
+    if (op === "del") await api(`/api/wishlist/${id}`, { method: "DELETE" });
+    if (op === "inc") await api(`/api/wishlist/${id}`, { method: "PATCH", json: { quantity: w.quantity + 1 } });
+    if (op === "dec") await api(`/api/wishlist/${id}`, { method: "PATCH", json: { quantity: w.quantity - 1 } });
+    loadWishlist();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+const wishAutocomplete = debounce(async (q) => {
+  if (q.length < 2) return;
+  try {
+    const { data } = await api("/api/autocomplete?q=" + encodeURIComponent(q));
+    $("#wish-ac").innerHTML = data.slice(0, 20).map((n) => `<option value="${esc(n)}">`).join("");
+  } catch (_) { /* egal */ }
+}, 200);
+
+function bindWishlist() {
+  const box = $("#wish-main");
+  box.addEventListener("submit", async (e) => {
+    if (e.target.id !== "wish-add") return;
+    e.preventDefault();
+    const btn = $("button", e.target);
+    btn.disabled = true;
+    try {
+      const w = await api("/api/wishlist", { method: "POST", json: {
+        name: $("#wish-name").value.trim(), quantity: +$("#wish-qty").value || 1,
+        max_price_eur: $("#wish-max").value.trim(), foil: $("#wish-foil").checked } });
+      toast(`${w.name} auf der Wunschliste${w.price_eur != null ? " (aktuell " + fmtEur(w.price_eur) + ")" : ""}`, "ok");
+      await loadWishlist();
+      $("#wish-name").focus();
+    } catch (err) { toast(err.message, "err"); btn.disabled = false; }
+  });
+  box.addEventListener("click", async (e) => {
+    const op = e.target.closest("[data-wop]");
+    if (op) return wishOp(op.closest("[data-wid]").dataset.wid, op.dataset.wop);
+    const a = e.target.closest("[data-wact]");
+    if (a && a.dataset.wact === "refresh") {
+      a.disabled = true;
+      a.textContent = "Prüfe Preise …";
+      try {
+        const r = await api("/api/wishlist/refresh", { method: "POST" });
+        toast(`${r.updated} Preise aktualisiert`, "ok");
+      } catch (err) { toast(err.message, "err"); }
+      loadWishlist();
+    }
+  });
+  box.addEventListener("change", async (e) => {
+    if (!e.target.classList.contains("wish-target")) return;
+    const id = e.target.closest("[data-wid]").dataset.wid;
+    try {
+      await api(`/api/wishlist/${id}`, { method: "PATCH", json: { max_price_eur: e.target.value.trim() } });
+      loadWishlist();
+    } catch (err) { toast(err.message, "err"); }
+  });
+  box.addEventListener("input", (e) => { if (e.target.id === "wish-name") wishAutocomplete(e.target.value.trim()); });
+  refreshWishBadge();
+}
+
+bindWishlist();

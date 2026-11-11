@@ -70,6 +70,8 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private lateinit var sessionView: TextView
     private lateinit var recentList: RecyclerView
     private lateinit var recentAdapter: RecentAdapter
+    private lateinit var batchSwitch: MaterialSwitch
+    private lateinit var batchButton: Button
 
     private var camera: Camera? = null
     private lateinit var executor: ExecutorService
@@ -109,6 +111,15 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         pendingView = view.findViewById(R.id.pending)
         sessionView = view.findViewById(R.id.sessionCount)
         recentList = view.findViewById(R.id.recent)
+        batchSwitch = view.findViewById(R.id.batchMode)
+        batchButton = view.findViewById(R.id.btnBatch)
+        batchSwitch.isChecked = BatchStore.isEnabled(requireContext())
+        batchSwitch.setOnCheckedChangeListener { _, on ->
+            BatchStore.setEnabled(requireContext(), on)
+            status.text = if (on) "Stapel-Modus: Karten werden gesammelt und am Ende gespeichert" else "Einzel-Modus"
+            refreshBatchButton()
+        }
+        batchButton.setOnClickListener { startActivity(Intent(requireContext(), BatchActivity::class.java)) }
 
         recentAdapter = RecentAdapter(viewLifecycleOwner.lifecycleScope) { scan -> recentActions(scan) }
         recentList.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
@@ -146,6 +157,26 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         ) startCamera() else permission.launch(Manifest.permission.CAMERA)
 
         syncPending(manual = false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::batchButton.isInitialized) refreshBatchButton()
+    }
+
+    private fun refreshBatchButton() {
+        val ctx = context ?: return
+        val n = BatchStore.count(ctx)
+        batchButton.visibility = if (n > 0) View.VISIBLE else View.GONE
+        batchButton.text = "✓ Stapel abschließen – $n Karten · ${euro(BatchStore.value(ctx))}"
+    }
+
+    private fun addToBatch(item: BatchItem) {
+        val qty = BatchStore.add(requireContext(), item)
+        feedback.success(overlay, sound)
+        val price = item.unitPrice?.let { " · ${euro(it)}" } ?: ""
+        status.text = "＋ ${item.name}$price" + if (qty > 1) " (jetzt ${qty}×)" else ""
+        refreshBatchButton()
     }
 
     override fun onDestroy() {
@@ -275,11 +306,27 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives)
-                if (autoSwitch.isChecked) addCard(card, 1, foilCheck.isChecked) else showResult(card)
+                when {
+                    batchSwitch.isChecked -> {
+                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked))
+                        blockedName = CardTextParser.normalize(name)
+                        overlay.active = false
+                        delay(400L)
+                        paused = false
+                    }
+                    autoSwitch.isChecked -> addCard(card, 1, foilCheck.isChecked)
+                    else -> showResult(card)
+                }
             } catch (e: ApiException) {
                 blockedName = CardTextParser.normalize(name)
                 overlay.active = false
-                if (e.code == Api.UNREACHABLE) {
+                if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
+                    // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
+                    addToBatch(BatchItem(null, name, scan.setCode, scan.collectorNumber, 1, foilCheck.isChecked,
+                        null, null, null))
+                    status.text = "Offline – „$name“ im Stapel (wird beim Speichern geprüft)"
+                    delay(900L)
+                } else if (e.code == Api.UNREACHABLE) {
                     queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1))
                     delay(900L)
                 } else {
@@ -336,6 +383,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
                 feedback.success(overlay, sound)
                 status.text = "✓ ${res.optString("name")} – jetzt ${res.optInt("quantity")}×"
+                val wishes = res.optJSONArray("wish_fulfilled")
+                if (wishes != null && wishes.length() > 0) {
+                    Toast.makeText(requireContext(), "★ Wunsch erfüllt: ${wishes.getJSONObject(0).optString("name")}",
+                        Toast.LENGTH_LONG).show()
+                }
                 refreshSessionViews()
                 dismissResult()
                 syncPending(manual = false)

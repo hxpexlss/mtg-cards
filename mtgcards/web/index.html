@@ -13,6 +13,7 @@
   <nav class="tabs">
     <button data-tab="collection" class="active">Sammlung</button>
     <button data-tab="decks">Decks</button>
+    <button data-tab="wishlist">Wunschliste</button>
     <button data-tab="stats">Statistik</button>
   </nav>
   <div class="searchbox">
@@ -100,6 +101,10 @@
       <p>Lege ein Deck an und füge eine Deckliste ein (z.B. Export aus Moxfield, Archidekt oder MTG Arena).
       Du siehst dann sofort, welche Karten du schon besitzt und welche fehlen.</p></div>
   </main>
+</div>
+
+<div class="layout hidden" id="wish-view">
+  <main class="content" id="wish-main"></main>
 </div>
 
 <div class="layout hidden" id="stats-view">
@@ -214,5 +219,6 @@
 <script src="app.js"></script>
 <script src="decks.js"></script>
 <script src="stats.js"></script>
+<script src="wishlist.js"></script>
 </body>
 </html>

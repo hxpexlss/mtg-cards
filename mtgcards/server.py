@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 from . import APP_NAME, __version__
 from .db import Database
 from .decks import DeckStore
+from .wishlist import Wishlist
 from .importexport import export_csv, export_json, import_cards
 from .netinfo import DiscoveryResponder, local_addresses, tailscale_dns_name
 from . import tls
@@ -39,6 +40,7 @@ class AppContext:
     def __init__(self, db, scryfall, token, kind="server", port=None, desktop=None):
         self.db = db
         self.decks = DeckStore(db)
+        self.wishlist = Wishlist(db)
         self.scryfall = scryfall
         self.token = token
         self.kind = kind            # "server" oder "desktop"
@@ -347,8 +349,8 @@ def r_lookup(h, qs):
     h.send_json(card)
 
 
-def r_add(h, qs):
-    data = h.read_json()
+def _add_one(h, data):
+    """Fügt eine Karte hinzu und erfüllt passende Wünsche. Gibt (zeile, neu) zurück."""
     if not (data.get("name") or data.get("scryfall_id") or data.get("id")):
         raise ApiError(400, "name oder scryfall_id angeben")
     card = normalize_card(_lookup_from(h, data))
@@ -360,7 +362,30 @@ def r_add(h, qs):
                                 tags=data.get("tags") or [], notes=data.get("notes") or "")
     row["created"] = created
     row["owned"] = h.ctx.db.find_owned(row["scryfall_id"], row["oracle_id"])
+    row["wish_fulfilled"] = h.ctx.wishlist.fulfill(card, qty)
+    return row, created
+
+
+def r_add(h, qs):
+    row, created = _add_one(h, h.read_json())
     h.send_json(row, 201 if created else 200)
+
+
+def r_add_batch(h, qs):
+    """Stapel-Scan: viele Karten auf einmal speichern. Fehler einzelner Karten brechen nicht ab."""
+    data = h.read_json()
+    results, errors, wishes = [], [], []
+    for i, item in enumerate(data.get("cards") or []):
+        try:
+            row, created = _add_one(h, item)
+            results.append({"index": i, "id": row["id"], "name": row["name"], "quantity": row["quantity"],
+                            "created": created})
+            wishes += row["wish_fulfilled"]
+        except (ApiError, ScryfallError) as e:
+            errors.append({"index": i, "name": item.get("name") or item.get("scryfall_id"), "error": str(e)})
+    h.send_json({"added": sum(int(c.get("quantity") or 1) for i, c in enumerate(data.get("cards") or [])
+                              if any(r["index"] == i for r in results)),
+                 "results": results, "errors": errors, "wish_fulfilled": wishes})
 
 
 def r_patch(h, qs, cid):
@@ -403,7 +428,12 @@ def refresh_all(ctx):
             updated += 1
     ctx.db.set_meta("last_price_refresh", now_iso())
     ctx.db.snapshot_value()
-    return {"updated": updated, "total": len(cards), "missing": len(cards) - updated}
+    wishes = None
+    try:
+        wishes = ctx.wishlist.refresh_prices(ctx.scryfall)
+    except ScryfallError:
+        pass
+    return {"updated": updated, "total": len(cards), "missing": len(cards) - updated, "wishlist": wishes}
 
 
 def r_refresh_all(h, qs):
@@ -542,7 +572,91 @@ def r_deck_export(h, qs, did):
     h.send_bytes(text.encode("utf-8"), "text/plain; charset=utf-8")
 
 
+# -- Wunschliste -----------------------------------------------------------------
+
+def r_wish_list(h, qs):
+    h.send_json(h.ctx.wishlist.list())
+
+
+def _parse_price(v):
+    if v in (None, ""):
+        return None
+    try:
+        return float(str(v).replace(",", ".").replace("€", "").strip())
+    except ValueError:
+        raise ApiError(400, "Ungültiger Zielpreis") from None
+
+
+def r_wish_add(h, qs):
+    data = h.read_json()
+    if not (data.get("name") or data.get("scryfall_id")):
+        raise ApiError(400, "name oder scryfall_id angeben")
+    card = normalize_card(_lookup_from(h, data))
+    any_print = data.get("any_print", not data.get("scryfall_id"))
+    foil = bool(data.get("foil"))
+    price = pset = None
+    if any_print:
+        try:
+            best = h.ctx.wishlist.cheapest_print(h.ctx.scryfall, card["name"], foil)
+            if best:
+                price, pset = best
+        except ScryfallError:
+            pass
+    item = h.ctx.wishlist.add(card, int(data.get("quantity") or 1), _parse_price(data.get("max_price_eur")),
+                              any_print=any_print, foil=foil, notes=data.get("notes") or "",
+                              price=price, price_set=pset)
+    h.send_json(item, 201)
+
+
+def r_wish_patch(h, qs, wid):
+    data = h.read_json()
+    if "max_price_eur" in data:
+        data["max_price_eur"] = _parse_price(data["max_price_eur"])
+    res = h.ctx.wishlist.update(_card_id(wid), data)
+    if res is None:
+        raise ApiError(404, "Wunsch nicht gefunden")
+    h.send_json(res)
+
+
+def r_wish_delete(h, qs, wid):
+    if not h.ctx.wishlist.delete(_card_id(wid)):
+        raise ApiError(404, "Wunsch nicht gefunden")
+    h.send_json({"deleted": True})
+
+
+def r_wish_refresh(h, qs):
+    h.send_json(h.ctx.wishlist.refresh_prices(h.ctx.scryfall))
+
+
+def r_deck_to_wishlist(h, qs, did):
+    """Fehlende Karten eines Decks auf die Wunschliste setzen (günstigster Druck)."""
+    deck = _deck_or_404(h.ctx.decks.get(_card_id(did)))
+    added = []
+    for c in deck["cards"]:
+        if c["board"] not in ("commander", "main") or c["missing"] <= 0:
+            continue
+        price = pset = None
+        try:
+            best = h.ctx.wishlist.cheapest_print(h.ctx.scryfall, c["name"])
+            if best:
+                price, pset = best
+        except ScryfallError:
+            pass
+        card = {k: c.get(k) for k in ("name", "oracle_id", "type_line", "mana_cost", "color_identity", "image_url")}
+        h.ctx.wishlist.add(card, c["missing"], None, any_print=True, price=price, price_set=pset,
+                           notes=f"für Deck {deck['name']}")
+        added.append(c["name"])
+    h.send_json({"added": added})
+
+
 ROUTES = [
+    ("GET", r"/api/wishlist", r_wish_list),
+    ("POST", r"/api/wishlist", r_wish_add),
+    ("POST", r"/api/wishlist/refresh", r_wish_refresh),
+    ("PATCH", r"/api/wishlist/(\d+)", r_wish_patch),
+    ("DELETE", r"/api/wishlist/(\d+)", r_wish_delete),
+    ("POST", r"/api/decks/(\d+)/to-wishlist", r_deck_to_wishlist),
+    ("POST", r"/api/cards/batch", r_add_batch),
     ("GET", r"/api/decks", r_decks),
     ("POST", r"/api/decks", r_deck_create),
     ("GET", r"/api/decks/(\d+)", r_deck_get),

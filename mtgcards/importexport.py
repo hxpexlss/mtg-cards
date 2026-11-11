@@ -7,6 +7,7 @@ import json
 from . import __version__
 from .db import CARD_FIELDS, EXPORT_FIELDS, _as_list, _bool, now_iso
 from .decks import export_decks, import_decks
+from .wishlist import export_wishlist, import_wishlist
 from .scryfall import ScryfallError, normalize_card
 
 # Spaltennamen anderer Tools (Moxfield, Deckbox, ManaBox, ...) auf unsere abbilden
@@ -33,6 +34,7 @@ def export_json(db):
         "exported_at": now_iso(),
         "cards": cards,
         "decks": export_decks(db),
+        "wishlist": export_wishlist(db),
     }, ensure_ascii=False, indent=2)
 
 
@@ -62,7 +64,7 @@ def _parse_import(text):
         data = json.loads(stripped)
         decks = None
         if isinstance(data, dict):
-            decks = data.get("decks")
+            decks = {"decks": data.get("decks"), "wishlist": data.get("wishlist")}
             data = data.get("cards", [])
         if not isinstance(data, list):
             raise ValueError("Unbekanntes JSON-Format")
@@ -99,7 +101,10 @@ def import_cards(db, scryfall, text, mode="add"):
     with db._lock:  # gesamter Import in einer Transaktion
         result = _import_rows(db, scryfall, rows, mode)
         if decks is not None:
-            result["decks"] = import_decks(db, decks, replace=(mode == "replace"))
+            if decks.get("decks") is not None:
+                result["decks"] = import_decks(db, decks["decks"], replace=(mode == "replace"))
+            if decks.get("wishlist") is not None:
+                result["wishlist"] = import_wishlist(db, decks["wishlist"], replace=(mode == "replace"))
         return result
 
 

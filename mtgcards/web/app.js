@@ -346,6 +346,7 @@ async function submitAdd(ev) {
       json: { name, scryfall_id: id || undefined, quantity: +$("#add-qty").value || 1, foil: $("#add-foil").checked, tags },
     });
     toast(`${c.name} hinzugefügt (jetzt ${c.quantity}×)`, "ok");
+    for (const w of c.wish_fulfilled || []) toast(`★ Wunsch erfüllt: ${w.name}${w.remaining ? ` (noch ${w.remaining} gewünscht)` : ""}`, "ok");
     loadCards();
     if ($("#add-keep").checked) {
       $("#add-name").value = "";
@@ -535,7 +536,10 @@ async function poll() {
     const { revision } = await api("/api/revision");
     if (state.revision >= 0 && revision !== state.revision) {
       const latest = await api("/api/cards?sort=updated&limit=1");
-      if (latest.cards[0]) toast(`Aktualisiert: ${latest.cards[0].name} (${latest.cards[0].quantity}×)`);
+      const c = latest.cards[0];
+      const stamp = c ? `${c.id}|${c.updated_at}` : "";
+      if (c && state.lastStamp && stamp !== state.lastStamp) toast(`Aktualisiert: ${c.name} (${c.quantity}×)`);
+      state.lastStamp = stamp;
       await loadCards();
       if (typeof onRevisionChange === "function") onRevisionChange();
     }

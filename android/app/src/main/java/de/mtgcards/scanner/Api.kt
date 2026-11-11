@@ -134,6 +134,21 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun decks() = json("GET", "/api/decks")
 
+    suspend fun wishlist() = json("GET", "/api/wishlist")
+
+    suspend fun wishAdd(name: String, maxPrice: String, quantity: Int = 1) = json("POST", "/api/wishlist", JSONObject().apply {
+        put("name", name)
+        put("quantity", quantity)
+        if (maxPrice.isNotBlank()) put("max_price_eur", maxPrice)
+    })
+
+    suspend fun wishUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/wishlist/$id", changes)
+
+    suspend fun wishDelete(id: Long) = json("DELETE", "/api/wishlist/$id")
+
+    /** Stapel-Scan: alle Karten auf einmal speichern. */
+    suspend fun addBatch(cards: org.json.JSONArray) = json("POST", "/api/cards/batch", JSONObject().put("cards", cards))
+
     suspend fun deck(id: Long) = json("GET", "/api/decks/$id")
 
     suspend fun deckMissingText(id: Long) = request("GET", "/api/decks/$id/export?missing=1")

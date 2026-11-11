@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.3.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.4.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.3.0_all.deb
+sudo apt install ./mtg-cards-server_1.4.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -159,6 +159,30 @@ In der App und im Desktop-Server-Modus die Adresse mit `https://` eintragen. Bei
 Zertifikats-Fingerabdruck angezeigt – mit dem am PC/Server angezeigten vergleichen und bestätigen. Danach wird
 er bei jeder Verbindung geprüft; ändert sich das Zertifikat, verweigert die App die Verbindung.
 
+## Wunschliste
+
+Tab **Wunschliste** (PC) bzw. **Wünsche** (App):
+
+- Karten mit Anzahl und optionalem **Zielpreis** eintragen. Ohne bestimmten Druck zählt der **günstigste Druck**.
+- Preise werden mit der täglichen Aktualisierung geprüft (am PC auch per „Preise prüfen“). Liegt der Preis am oder
+  unter dem Zielpreis, wird die Karte grün markiert, der Tab zeigt einen Zähler und die **App benachrichtigt** dich
+  (Prüfung etwa alle 6 Stunden; Benachrichtigungen beim ersten Öffnen der Wunschliste erlauben).
+- Scannst oder trägst du eine gewünschte Karte ein, wird der Wunsch **automatisch erfüllt** (Anzahl verringert bzw.
+  entfernt).
+- Im Deck: **Fehlende → Wunschliste** setzt alle fehlenden Karten mit aktuellem Bestpreis auf die Liste.
+- Die Wunschliste ist im JSON-Export enthalten.
+
+## Stapel-Scan
+
+In der App den Schalter **Stapel** einschalten: Erkannte Karten werden nicht sofort gespeichert, sondern gesammelt
+(gleiche Karte erhöht die Anzahl). Der Knopf **„Stapel abschließen – N Karten · Wert“** öffnet die Zusammenfassung:
+
+- Anzahl ±, Foil umschalten, Fehlscans entfernen (− bei Anzahl 1)
+- Gesamtwert des Stapels
+- **Alle speichern** überträgt alles auf einmal; nicht gefundene Karten bleiben im Stapel zur Korrektur
+- Der Stapel bleibt auch nach Schließen der App erhalten; ohne Verbindung gescannte Karten werden beim Speichern
+  nachgeschlagen
+
 ## Statistik
 
 Tab **Statistik**: Wert der Sammlung (€ und $), Wertverlauf, Manakurve, Kartentypen, Farbidentitäten, Seltenheiten,
@@ -202,6 +226,9 @@ Header `Authorization: Bearer <TOKEN>`.
 |---|---|---|
 | GET | `/api/cards?q=&ci=WU&ci_mode=within&tag=Commander&type=&sort=` | Suche |
 | POST | `/api/cards` `{name \| scryfall_id, set, cn, quantity, foil, tags}` | Hinzufügen (Anzahl wird bei gleichem Druck erhöht) |
+| POST | `/api/cards/batch` `{cards: [...]}` | Stapel speichern |
+| GET/POST | `/api/wishlist` | Wunschliste / Wunsch hinzufügen (`{name, quantity, max_price_eur}`) |
+| PATCH/DELETE | `/api/wishlist/{id}` | Wunsch ändern / entfernen |
 | GET/PATCH/DELETE | `/api/cards/{id}` | Einzelne Karte |
 | GET | `/api/lookup?name=&set=&cn=` | Karte bei Scryfall nachschlagen (inkl. Bestand) |
 | GET | `/api/autocomplete?q=`, `/api/prints?name=` | Namensvorschläge, Drucke |
