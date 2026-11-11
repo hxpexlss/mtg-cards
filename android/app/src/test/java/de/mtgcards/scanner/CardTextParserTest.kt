@@ -34,7 +34,7 @@ class CardTextParserTest {
             line("DMU • DE", 120, 1038, 240, 1058),
         )
         val r = CardTextParser.parse(lines, card)
-        assertEquals("Krenko, Boss der Blechstraße", r.name)
+        assertEquals("Krenko Boss der Blechstraße", r.name)
         assertEquals("123", r.collectorNumber)
         assertEquals("DMU", r.setCode)
     }
