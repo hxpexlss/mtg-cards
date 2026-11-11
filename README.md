@@ -20,7 +20,7 @@ Eigene Tags (z.B. `Deck: Atraxa`, `Tauschen`) und Notizen können zusätzlich ve
 
 ## Download
 
-Die Pakete werden von GitHub Actions gebaut: **Actions → Build → neuester Lauf → Artifacts**
+**Fertige Dateien: [GitHub-Releases](../../releases/latest)** (APK + beide .deb). Sie werden von GitHub Actions bei jedem Push automatisch gebaut und veröffentlicht; zusätzlich unter **Actions → Build → Artifacts**
 (`android-apk` und `deb-pakete`). Für einen Release mit Download-Links einen Tag pushen: `git tag v1.0.0 && git push --tags`.
 
 Lokal bauen:
