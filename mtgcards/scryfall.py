@@ -7,6 +7,7 @@
 
 import difflib
 import json
+import os
 import re
 import threading
 import time
@@ -130,8 +131,50 @@ def normalize_card(raw):
     return card
 
 
+class DiskCache:
+    """Persistenter Cache für Scryfall-Antworten (SQLite).
+
+    Beschleunigt wiederholte Abfragen und erlaubt Nachschlagen ohne Internet
+    (veraltete Einträge werden genutzt, wenn Scryfall nicht erreichbar ist).
+    """
+
+    def __init__(self, path, max_entries=50000):
+        import sqlite3
+        if path != ":memory:":
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.lock = threading.Lock()
+        self.max_entries = max_entries
+        with self.lock:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, data TEXT, ts REAL)")
+            self.conn.commit()
+
+    def get(self, url):
+        with self.lock:
+            row = self.conn.execute("SELECT data, ts FROM http_cache WHERE url=?", (url,)).fetchone()
+        if not row:
+            return None, None
+        return json.loads(row[0]), row[1]
+
+    def put(self, url, data):
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO http_cache(url, data, ts) VALUES(?,?,?)",
+                              (url, json.dumps(data), time.time()))
+            if self.conn.total_changes % 500 == 0:
+                self.conn.execute(
+                    "DELETE FROM http_cache WHERE url IN (SELECT url FROM http_cache ORDER BY ts DESC LIMIT -1 OFFSET ?)",
+                    (self.max_entries,))
+            self.conn.commit()
+
+    def close(self):
+        with self.lock:
+            self.conn.close()
+
+
 class Scryfall:
-    def __init__(self, base=API_BASE, timeout=15, min_interval=0.1, cache_size=2000):
+    def __init__(self, base=API_BASE, timeout=15, min_interval=0.1, cache_size=2000,
+                 cache_path=None, cache_ttl=3 * 86400):
         self.base = base.rstrip("/")
         self.timeout = timeout
         self.min_interval = min_interval
@@ -140,29 +183,36 @@ class Scryfall:
         self._cache = OrderedDict()
         self._cache_size = cache_size
         self._cache_lock = threading.Lock()
+        self.cache_ttl = cache_ttl
+        self.disk = DiskCache(cache_path) if cache_path else None
 
     # -- HTTP -------------------------------------------------------------
-    def _get(self, path, params=None, cache=True):
-        url = self.base + path
-        if params:
-            url += "?" + urlencode({k: v for k, v in params.items() if v not in (None, "")})
-        if cache:
-            with self._cache_lock:
-                if url in self._cache:
-                    self._cache.move_to_end(url)
-                    return self._cache[url]
+    def _remember(self, url, data, disk=True):
+        with self._cache_lock:
+            self._cache[url] = (data, time.time())
+            while len(self._cache) > self._cache_size:
+                self._cache.popitem(last=False)
+        if disk and self.disk:
+            try:
+                self.disk.put(url, data)
+            except Exception:  # noqa: BLE001 – Cache-Fehler nie nach außen geben
+                pass
+
+    def _request(self, url, body=None):
         with self._lock:
             wait = self.min_interval - (time.monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
             self._last = time.monotonic()
-        req = Request(url, headers={
-            "User-Agent": f"MTGCardsCollection/{__version__}",
-            "Accept": "application/json",
-        })
+        headers = {"User-Agent": f"MTGCardsCollection/{__version__}", "Accept": "application/json"}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = Request(url, data=data, headers=headers)
         try:
             with urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
         except HTTPError as e:
             try:
                 details = json.loads(e.read().decode("utf-8")).get("details")
@@ -171,12 +221,52 @@ class Scryfall:
             raise ScryfallError(details or f"Scryfall-Fehler {e.code}", e.code) from None
         except (URLError, TimeoutError, OSError) as e:
             raise ScryfallError(f"Scryfall nicht erreichbar: {e}", 503) from None
+
+    def _get(self, path, params=None, cache=True):
+        url = self.base + path
+        if params:
+            url += "?" + urlencode({k: v for k, v in params.items() if v not in (None, "")})
+        now = time.time()
+        stale = None
         if cache:
             with self._cache_lock:
-                self._cache[url] = data
-                while len(self._cache) > self._cache_size:
-                    self._cache.popitem(last=False)
+                hit = self._cache.get(url)
+                if hit and now - hit[1] < self.cache_ttl:
+                    self._cache.move_to_end(url)
+                    return hit[0]
+            if self.disk:
+                try:
+                    data, ts = self.disk.get(url)
+                except Exception:  # noqa: BLE001
+                    data, ts = None, None
+                if data is not None:
+                    if now - ts < self.cache_ttl:
+                        with self._cache_lock:
+                            self._cache[url] = (data, ts)
+                        return data
+                    stale = data
+        try:
+            data = self._request(url)
+        except ScryfallError as e:
+            if e.status == 503 and stale is not None:
+                return stale  # offline: veraltete Daten sind besser als keine
+            raise
+        if cache:
+            self._remember(url, data)
         return data
+
+    def collection(self, scryfall_ids):
+        """Viele Karten auf einmal laden (max. 75 pro Anfrage). Gibt {id: karte} zurück."""
+        out = {}
+        ids = [i for i in scryfall_ids if i]
+        for i in range(0, len(ids), 75):
+            chunk = ids[i:i + 75]
+            data = self._request(self.base + "/cards/collection",
+                                 body={"identifiers": [{"id": x} for x in chunk]})
+            for card in data.get("data", []):
+                out[card["id"]] = card
+                self._remember(self.base + f"/cards/{quote(card['id'])}", card)
+        return out
 
     # -- Endpunkte --------------------------------------------------------
     def by_id(self, scryfall_id):

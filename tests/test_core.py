@@ -195,6 +195,10 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(self.call(f"/api/cards/{lst['cards'][0]['id']}", "DELETE", token=tok)[0], 200)
         self.assertGreater(self.call("/api/revision", token=tok)[1]["revision"], rev)
 
+        st, res = self.call("/api/refresh-all", "POST", token=tok)
+        self.assertEqual(res["missing"], 0)
+        self.assertEqual(self.call("/api/cards", token=tok)[1]["cards"][0]["price_eur"], "99.00")
+
         st, html = self.call("/", token=None)
         self.assertIn("MTG Cards", html)
         st, ac = self.call("/api/autocomplete?q=sol", token=tok)

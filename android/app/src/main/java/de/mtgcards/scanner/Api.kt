@@ -17,6 +17,9 @@ class Api(private val baseUrl: String, private val token: String) {
 
     companion object {
         const val DEFAULT_PORT = 8765
+        /** Fehlercode: Server nicht erreichbar (Netzwerk). */
+        const val UNREACHABLE = 0
+        const val NOT_CONFIGURED = -1
 
         fun fromPrefs(ctx: Context): Api = Api(Prefs.serverUrl(ctx), Prefs.token(ctx))
 
@@ -38,7 +41,7 @@ class Api(private val baseUrl: String, private val token: String) {
     private suspend fun request(method: String, path: String, body: JSONObject? = null): String =
         withContext(Dispatchers.IO) {
             if (baseUrl.isBlank()) {
-                throw ApiException("Kein Server eingestellt – bitte unter Einstellungen eintragen")
+                throw ApiException("Kein Server eingestellt – bitte unter Einstellungen eintragen", NOT_CONFIGURED)
             }
             var conn: HttpURLConnection? = null
             try {
@@ -93,6 +96,16 @@ class Api(private val baseUrl: String, private val token: String) {
     suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("scryfall_id", scryfallId)
+            put("quantity", quantity)
+            put("foil", foil)
+        })
+
+    /** Hinzufügen per Name (+ optional Set/Nummer) – der Server schlägt bei Scryfall nach. */
+    suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean): JSONObject =
+        json("POST", "/api/cards", JSONObject().apply {
+            put("name", name)
+            if (!setCode.isNullOrBlank()) put("set", setCode)
+            if (!cn.isNullOrBlank()) put("cn", cn)
             put("quantity", quantity)
             put("foil", foil)
         })

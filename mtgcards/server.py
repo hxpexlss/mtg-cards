@@ -375,6 +375,19 @@ def r_refresh(h, qs, cid):
     h.send_json(h.ctx.db.refresh_card_data(card["id"], normalize_card(raw)))
 
 
+def r_refresh_all(h, qs):
+    """Aktualisiert Kartendaten und Preise aller Karten per Scryfall-Sammelabfrage."""
+    cards = h.ctx.db.all()
+    fetched = h.ctx.scryfall.collection(sorted({c["scryfall_id"] for c in cards if c.get("scryfall_id")}))
+    updated = 0
+    for c in cards:
+        raw = fetched.get(c.get("scryfall_id"))
+        if raw:
+            h.ctx.db.refresh_card_data(c["id"], normalize_card(raw))
+            updated += 1
+    h.send_json({"updated": updated, "total": len(cards), "missing": len(cards) - updated})
+
+
 def r_autocomplete(h, qs):
     q = _first(qs, "q")
     h.send_json({"data": h.ctx.scryfall.autocomplete(q) if q else []})
@@ -430,6 +443,7 @@ ROUTES = [
     ("PATCH", r"/api/cards/(\d+)", r_patch),
     ("DELETE", r"/api/cards/(\d+)", r_delete),
     ("POST", r"/api/cards/(\d+)/refresh", r_refresh),
+    ("POST", r"/api/refresh-all", r_refresh_all),
     ("GET", r"/api/lookup", r_lookup),
     ("GET", r"/api/autocomplete", r_autocomplete),
     ("GET", r"/api/prints", r_prints),
@@ -461,13 +475,22 @@ def test_remote(url, token):
         return {"ok": False, "error": f"Nicht erreichbar: {e}"}
 
 
+def cache_path_for(db_path):
+    """Scryfall-Cache liegt neben der Datenbank (z.B. /var/lib/mtg-cards/scryfall-cache.db)."""
+    if db_path == ":memory:":
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(db_path)), "scryfall-cache.db")
+
+
 class Server:
     """Startet HTTP-Server (+ optional UDP-Discovery) in Hintergrund-Threads."""
 
     def __init__(self, db_path, token, bind="0.0.0.0", port=8765, kind="server",
                  discovery=True, desktop=None, scryfall=None):
         self.db = Database(db_path)
-        self.ctx = AppContext(self.db, scryfall or Scryfall(), token, kind=kind,
+        if scryfall is None:
+            scryfall = Scryfall(cache_path=cache_path_for(db_path))
+        self.ctx = AppContext(self.db, scryfall, token, kind=kind,
                               port=port, desktop=desktop)
         handler = type("BoundHandler", (Handler,), {"ctx": self.ctx})
         ThreadingHTTPServer.allow_reuse_address = True

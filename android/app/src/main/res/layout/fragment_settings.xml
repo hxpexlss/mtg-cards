@@ -79,11 +79,18 @@
             android:layout_marginTop="18dp"
             android:text="Gescannte Karten sofort hinzufügen (ohne Bestätigung)" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/soundSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Ton beim Scannen" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
             android:alpha="0.75"
-            android:text="Tailscale: Installiere Tailscale auf Handy und PC/Server und trage die Tailscale-IP (100.x.y.z) oder den MagicDNS-Namen (z.B. mein-pc.tailnet.ts.net) ein. Der Port ist standardmäßig 8765 und wird automatisch ergänzt." />
+            android:text="Tipps zum Scannen: Karte flach und gut beleuchtet halten (Blitz-Symbol = Licht), Bildschirm antippen zum Scharfstellen, mit zwei Fingern zoomen. Ohne Verbindung werden Scans gemerkt und später automatisch nachgetragen.\n\nTailscale: Installiere Tailscale auf Handy und PC/Server und trage die Tailscale-IP (100.x.y.z) oder den MagicDNS-Namen (z.B. mein-pc.tailnet.ts.net) ein. Der Port ist standardmäßig 8765 und wird automatisch ergänzt." />
     </LinearLayout>
 </ScrollView>

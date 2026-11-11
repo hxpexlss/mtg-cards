@@ -28,6 +28,10 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             isChecked = Prefs.autoAdd(requireContext())
             setOnCheckedChangeListener { _, c -> Prefs.setAutoAdd(requireContext(), c) }
         }
+        view.findViewById<MaterialSwitch>(R.id.soundSetting).apply {
+            isChecked = Prefs.sound(requireContext())
+            setOnCheckedChangeListener { _, c -> Prefs.setSound(requireContext(), c) }
+        }
         view.findViewById<Button>(R.id.btnSave).setOnClickListener { saveAndTest() }
         view.findViewById<Button>(R.id.btnDiscover).setOnClickListener { discover() }
     }

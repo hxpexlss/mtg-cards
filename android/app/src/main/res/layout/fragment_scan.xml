@@ -54,14 +54,53 @@
             android:src="@drawable/ic_flash" />
     </LinearLayout>
 
-    <Button
-        android:id="@+id/btnManual"
-        style="@style/Widget.Material3.Button.TonalButton"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="16dp"
-        android:text="Name manuell eingeben" />
+        android:layout_gravity="bottom"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:id="@+id/pending"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/bg_status"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="6dp"
+            android:textColor="#FFD27A"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/sessionCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:background="@drawable/bg_status"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="3dp"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:paddingHorizontal="8dp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnManual"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Name manuell eingeben" />
+    </LinearLayout>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/resultPanel"

@@ -82,6 +82,10 @@ class FakeScryfall:
                 return c
         raise ScryfallError(f'Keine Karte gefunden für "{name}"', 404)
 
+    def collection(self, ids):
+        self.calls += 1
+        return {c["id"]: dict(c, prices={"eur": "99.00"}) for c in ALL if c["id"] in ids}
+
     def autocomplete(self, q):
         return [c["name"] for c in ALL if q.lower() in c["name"].lower() and c["lang"] == "en"]
 

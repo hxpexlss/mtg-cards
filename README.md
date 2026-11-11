@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.0.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.1.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.0.0_all.deb
+sudo apt install ./mtg-cards-server_1.1.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -85,7 +85,12 @@ offline auf dem Handy. Erkannt werden der Kartenname und – wenn lesbar – Set
 damit der richtige Druck gespeichert wird. Funktioniert auch mit deutschen (und anderen) Karten.
 
 - **Auto**-Schalter: erkannte Karten sofort hinzufügen (für Stapel), sonst Vorschau mit Anzahl/Foil und „Hinzufügen“
-- Blitz-Symbol: Taschenlampe
+- Erkennung über mehrere Bilder: kleine OCR-Fehler werden toleriert, ~3–4 Auswertungen pro Sekunde
+- Vibration und Piepton bei Erfolg (Ton abschaltbar)
+- **Verlauf** der Sitzung unten: Karte antippen → Rückgängig (−1), +1 Exemplar oder Details
+- **Offline-Warteschlange**: Ist PC/Server nicht erreichbar, werden Scans gespeichert und automatisch nachgetragen,
+  sobald die Verbindung wieder da ist (oder Hinweis antippen)
+- Bildschirm antippen = scharfstellen, zwei Finger = zoomen, Blitz-Symbol = Taschenlampe
 - „Name manuell eingeben“, falls die Erkennung nicht klappt
 
 ## Import / Export
@@ -97,6 +102,10 @@ In der Desktop-/Weboberfläche unter **⇅ Import/Export**:
   Spalten `Name`, `Set`/`Edition`, `Collector Number`, `Quantity`/`Count`, `Foil`. Fehlende Daten werden über
   Scryfall ergänzt.
 - Modus „hinzufügen“ (Anzahlen werden addiert) oder „ersetzen“.
+- **Alle Karten aktualisieren**: lädt Regeltext und aktuelle Preise der ganzen Sammlung per Sammelabfrage neu.
+
+Scryfall-Antworten werden in `scryfall-cache.db` neben der Datenbank zwischengespeichert: wiederholte Scans sind
+sofort da, und bereits bekannte Karten lassen sich auch ohne Internet nachschlagen.
 
 ## Suche
 

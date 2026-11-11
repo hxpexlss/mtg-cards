@@ -549,6 +549,17 @@ function bind() {
   $("#btn-io").onclick = openIO;
   $("#btn-settings").onclick = openSettings;
   $("#imp-go").onclick = doImport;
+  $("#refresh-all").onclick = async (e) => {
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = "Aktualisiere …";
+    try {
+      const r = await api("/api/refresh-all", { method: "POST" });
+      toast(`${r.updated} von ${r.total} Einträgen aktualisiert`, "ok");
+      loadCards();
+    } catch (err) { toast(err.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "⟳ Alle Karten aktualisieren"; }
+  };
   $$("[data-close]").forEach((b) => b.onclick = () => b.closest("dialog").close());
   $$("dialog").forEach((d) => d.addEventListener("click", (e) => { if (e.target === d && d.id !== "dlg-login") d.close(); }));
 
