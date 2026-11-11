@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private fun show(id: Int) {
         val fragment: Fragment = when (id) {
             R.id.nav_search -> SearchFragment()
+            R.id.nav_decks -> DecksFragment()
             R.id.nav_settings -> SettingsFragment()
             else -> ScanFragment()
         }

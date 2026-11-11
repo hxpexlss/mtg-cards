@@ -31,6 +31,12 @@ jobs:
           TOKEN=$(sudo mtg-cards-server --show-token)
           curl -sf http://127.0.0.1:8765/api/health
           curl -sf -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/api/stats
+          echo "--- HTTPS"
+          sudo mtg-cards-server --enable-tls
+          sudo systemctl restart mtg-cards-server
+          sleep 2
+          systemctl status mtg-cards-server --no-pager
+          curl -skf https://127.0.0.1:8765/api/health
       - uses: actions/upload-artifact@v4
         with:
           name: deb-pakete

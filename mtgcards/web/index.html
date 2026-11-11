@@ -10,6 +10,10 @@
 <body>
 <header class="topbar">
   <div class="brand"><img src="icon.svg" alt=""><span>MTG Cards</span></div>
+  <nav class="tabs">
+    <button data-tab="collection" class="active">Sammlung</button>
+    <button data-tab="decks">Decks</button>
+  </nav>
   <div class="searchbox">
     <input id="q" type="search" placeholder="Sammlung durchsuchen – Name, Typ, Text, Tag …" autocomplete="off">
   </div>
@@ -21,7 +25,7 @@
   </div>
 </header>
 
-<div class="layout">
+<div class="layout" id="collection-view">
   <aside class="sidebar" id="sidebar">
     <section>
       <h3>Farbidentität</h3>
@@ -84,6 +88,32 @@
     </div>
   </main>
 </div>
+
+<div class="layout hidden" id="decks-view">
+  <aside class="sidebar">
+    <button class="btn primary" id="deck-new" style="width:100%;margin-top:12px">＋ Neues Deck</button>
+    <div id="deck-list" class="deck-list"></div>
+  </aside>
+  <main class="content" id="deck-main">
+    <div class="empty"><h2>Decks</h2>
+      <p>Lege ein Deck an und füge eine Deckliste ein (z.B. Export aus Moxfield, Archidekt oder MTG Arena).
+      Du siehst dann sofort, welche Karten du schon besitzt und welche fehlen.</p></div>
+  </main>
+</div>
+
+<!-- Deck anlegen / Liste importieren -->
+<dialog id="dlg-deck" class="modal">
+  <form method="dialog" class="modal-body" id="deck-form">
+    <header><h2 id="deck-form-title">Neues Deck</h2><button class="x" value="cancel" formnovalidate>×</button></header>
+    <label id="deck-name-wrap">Name <input id="deck-name" placeholder="z.B. Atraxa Superfriends"></label>
+    <label>Deckliste (optional) – eine Karte pro Zeile, z.B. „1 Sol Ring“; Abschnitte „Commander“, „Deck“, „Sideboard“
+      <textarea id="deck-list-text" rows="12" placeholder="Commander&#10;1 Atraxa, Praetors' Voice&#10;&#10;Deck&#10;1 Sol Ring&#10;1 Arcane Signet&#10;..."></textarea></label>
+    <label class="check" id="deck-replace-wrap"><input type="checkbox" id="deck-replace"> vorhandene Karten im Deck ersetzen</label>
+    <footer><span class="spacer"></span>
+      <button class="btn" value="cancel" formnovalidate>Abbrechen</button>
+      <button class="btn primary" id="deck-save" value="default">Speichern</button></footer>
+  </form>
+</dialog>
 
 <!-- Karte hinzufügen -->
 <dialog id="dlg-add" class="modal">
@@ -177,5 +207,6 @@
 
 <div id="toasts"></div>
 <script src="app.js"></script>
+<script src="decks.js"></script>
 </body>
 </html>

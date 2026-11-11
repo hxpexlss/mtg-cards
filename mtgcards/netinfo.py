@@ -60,10 +60,11 @@ class DiscoveryResponder(threading.Thread):
     (In Tailscale gibt es keine Broadcasts – dort die 100.x-IP oder den MagicDNS-Namen eintragen.)
     """
 
-    def __init__(self, port, kind):
+    def __init__(self, port, kind, tls_fingerprint=None):
         super().__init__(daemon=True, name="discovery")
         self.http_port = port
         self.kind = kind
+        self.tls_fingerprint = tls_fingerprint
         self.sock = None
 
     def run(self):
@@ -77,6 +78,7 @@ class DiscoveryResponder(threading.Thread):
         reply = json.dumps({
             "app": APP_NAME, "version": __version__, "name": socket.gethostname(),
             "port": self.http_port, "kind": self.kind,
+            "tls": bool(self.tls_fingerprint), "fingerprint": self.tls_fingerprint,
         }).encode()
         while True:
             try:

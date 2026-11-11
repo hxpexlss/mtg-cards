@@ -6,6 +6,7 @@ import json
 
 from . import __version__
 from .db import CARD_FIELDS, EXPORT_FIELDS, _as_list, _bool, now_iso
+from .decks import export_decks, import_decks
 from .scryfall import ScryfallError, normalize_card
 
 # Spaltennamen anderer Tools (Moxfield, Deckbox, ManaBox, ...) auf unsere abbilden
@@ -31,6 +32,7 @@ def export_json(db):
         "app_version": __version__,
         "exported_at": now_iso(),
         "cards": cards,
+        "decks": export_decks(db),
     }, ensure_ascii=False, indent=2)
 
 
@@ -49,15 +51,22 @@ def export_csv(db):
 
 def parse_import(text):
     """Erkennt JSON oder CSV und liefert eine Liste von dicts."""
+    return _parse_import(text)[0]
+
+
+def _parse_import(text):
+    """Wie parse_import, liefert zusätzlich enthaltene Decks (nur JSON-Export)."""
     text = text.lstrip("﻿")
     stripped = text.lstrip()
     if stripped.startswith("{") or stripped.startswith("["):
         data = json.loads(stripped)
+        decks = None
         if isinstance(data, dict):
+            decks = data.get("decks")
             data = data.get("cards", [])
         if not isinstance(data, list):
             raise ValueError("Unbekanntes JSON-Format")
-        return [d for d in data if isinstance(d, dict)]
+        return [d for d in data if isinstance(d, dict)], decks
     sample = text[:4096]
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
@@ -76,7 +85,7 @@ def parse_import(text):
                 row[mapped] = (v or "").strip()
         if row.get("name") or row.get("scryfall_id"):
             rows.append(row)
-    return rows
+    return rows, None
 
 
 def import_cards(db, scryfall, text, mode="add"):
@@ -86,9 +95,12 @@ def import_cards(db, scryfall, text, mode="add"):
           "replace" -> Datenbank wird vorher geleert
     Karten ohne vollständige Daten werden über Scryfall nachgeschlagen.
     """
-    rows = parse_import(text)
+    rows, decks = _parse_import(text)
     with db._lock:  # gesamter Import in einer Transaktion
-        return _import_rows(db, scryfall, rows, mode)
+        result = _import_rows(db, scryfall, rows, mode)
+        if decks is not None:
+            result["decks"] = import_decks(db, decks, replace=(mode == "replace"))
+        return result
 
 
 def _import_rows(db, scryfall, rows, mode):

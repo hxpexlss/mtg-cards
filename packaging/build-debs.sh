@@ -35,7 +35,7 @@ Section: games
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.8), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0
-Recommends: iproute2
+Recommends: iproute2, openssl
 Suggests: tailscale
 Maintainer: $MAINT
 Installed-Size: $(du -sk "$D/usr" | cut -f1)
@@ -65,7 +65,7 @@ Section: games
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.8), passwd
-Recommends: iproute2
+Recommends: iproute2, openssl
 Suggests: tailscale
 Maintainer: $MAINT
 Installed-Size: $(du -sk "$S/usr" | cut -f1)

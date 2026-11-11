@@ -9,19 +9,23 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLException
 
 class ApiException(message: String, val code: Int = 0) : Exception(message)
 
 /** Client für die REST-API von Desktop-App bzw. Headless-Server. */
-class Api(private val baseUrl: String, private val token: String) {
+class Api(private val baseUrl: String, private val token: String, private val fingerprint: String = "") {
 
     companion object {
         const val DEFAULT_PORT = 8765
         /** Fehlercode: Server nicht erreichbar (Netzwerk). */
         const val UNREACHABLE = 0
         const val NOT_CONFIGURED = -1
+        /** HTTPS-Zertifikat unbekannt -> Fingerabdruck bestätigen lassen. */
+        const val TLS_UNTRUSTED = -2
 
-        fun fromPrefs(ctx: Context): Api = Api(Prefs.serverUrl(ctx), Prefs.token(ctx))
+        fun fromPrefs(ctx: Context): Api = Api(Prefs.serverUrl(ctx), Prefs.token(ctx), Prefs.fingerprint(ctx))
 
         /** "192.168.1.5" -> "http://192.168.1.5:8765" */
         fun normalizeUrl(input: String): String {
@@ -29,8 +33,8 @@ class Api(private val baseUrl: String, private val token: String) {
             if (s.isEmpty()) return s
             if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
             val uri = Uri.parse(s)
-            if (uri.port == -1 && uri.scheme == "http" && uri.host != null) {
-                s = "http://${uri.host}:$DEFAULT_PORT${uri.path ?: ""}"
+            if (uri.port == -1 && uri.host != null) {
+                s = "${uri.scheme}://${uri.host}:$DEFAULT_PORT${uri.path ?: ""}"
             }
             return s.trimEnd('/')
         }
@@ -46,6 +50,7 @@ class Api(private val baseUrl: String, private val token: String) {
             var conn: HttpURLConnection? = null
             try {
                 conn = URL(baseUrl + path).openConnection() as HttpURLConnection
+                if (conn is HttpsURLConnection) Tls.configure(conn, fingerprint)
                 conn.requestMethod = method
                 conn.connectTimeout = 6000
                 conn.readTimeout = 30000
@@ -64,6 +69,8 @@ class Api(private val baseUrl: String, private val token: String) {
                     throw ApiException(msg.ifBlank { "HTTP-Fehler $code" }, code)
                 }
                 text
+            } catch (e: SSLException) {
+                throw ApiException("Zertifikat des Servers ist nicht vertrauenswürdig oder hat sich geändert", TLS_UNTRUSTED)
             } catch (e: IOException) {
                 throw ApiException("Server nicht erreichbar (${e.message ?: e.javaClass.simpleName})")
             } finally {
@@ -84,9 +91,11 @@ class Api(private val baseUrl: String, private val token: String) {
         return health
     }
 
-    suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null): JSONObject {
+    suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null,
+                       alternatives: List<String> = emptyList()): JSONObject {
         val q = buildList {
             if (!name.isNullOrBlank()) add("name=${enc(name)}")
+            alternatives.forEach { add("alt=${enc(it)}") }
             if (!setCode.isNullOrBlank()) add("set=${enc(setCode)}")
             if (!cn.isNullOrBlank()) add("cn=${enc(cn)}")
         }.joinToString("&")
@@ -122,6 +131,12 @@ class Api(private val baseUrl: String, private val token: String) {
     }
 
     suspend fun card(id: Long) = json("GET", "/api/cards/$id")
+
+    suspend fun decks() = json("GET", "/api/decks")
+
+    suspend fun deck(id: Long) = json("GET", "/api/decks/$id")
+
+    suspend fun deckMissingText(id: Long) = request("GET", "/api/decks/$id/export?missing=1")
 
     /** PUT wird vom Server wie PATCH behandelt (HttpURLConnection kann kein PATCH). */
     suspend fun update(id: Long, changes: JSONObject) = json("PUT", "/api/cards/$id", changes)

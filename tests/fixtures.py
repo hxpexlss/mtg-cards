@@ -82,6 +82,24 @@ class FakeScryfall:
                 return c
         raise ScryfallError(f'Keine Karte gefunden für "{name}"', 404)
 
+    def lookup_any(self, name=None, alternatives=(), **kw):
+        try:
+            return self.lookup(name=name, **kw)
+        except ScryfallError:
+            for alt in alternatives:
+                try:
+                    return self.lookup(name=alt)
+                except ScryfallError:
+                    pass
+            raise
+
+    def collection_identifiers(self, identifiers):
+        found, missing = [], []
+        for ident in identifiers:
+            match = [c for c in ALL if c["lang"] == "en" and c["name"].lower() == ident.get("name", "").lower()]
+            (found.append(match[0]) if match else missing.append(ident))
+        return found, missing
+
     def collection(self, ids):
         self.calls += 1
         return {c["id"]: dict(c, prices={"eur": "99.00"}) for c in ALL if c["id"] in ids}

@@ -5,7 +5,7 @@ import os
 import signal
 import sys
 
-from . import __version__, config
+from . import __version__, config, tls
 from .server import Server
 
 
@@ -18,6 +18,12 @@ def main(argv=None):
     p.add_argument("--no-discovery", action="store_true", help="UDP-Erkennung im LAN deaktivieren")
     p.add_argument("--show-token", action="store_true", help="Zugangs-Token anzeigen und beenden")
     p.add_argument("--new-token", action="store_true", help="Neuen Token erzeugen und beenden")
+    p.add_argument("--enable-tls", action="store_true",
+                   help="HTTPS aktivieren (erzeugt selbstsigniertes Zertifikat, oder --cert/--key angeben)")
+    p.add_argument("--disable-tls", action="store_true", help="HTTPS deaktivieren")
+    p.add_argument("--cert", help="Zertifikat (PEM), z.B. von 'tailscale cert'")
+    p.add_argument("--key", help="Privater Schlüssel (PEM) zum Zertifikat")
+    p.add_argument("--show-fingerprint", action="store_true", help="Zertifikats-Fingerabdruck anzeigen")
     p.add_argument("--export", metavar="DATEI", help="Sammlung exportieren (.json oder .csv; '-' = stdout)")
     p.add_argument("--import", dest="import_file", metavar="DATEI", help="Sammlung importieren (JSON/CSV)")
     p.add_argument("--replace", action="store_true", help="Beim Import Sammlung ersetzen statt ergänzen")
@@ -38,6 +44,14 @@ def main(argv=None):
     if args.show_token:
         print(cfg["token"])
         return 0
+    if args.enable_tls or args.disable_tls:
+        return configure_tls(args, cfg)
+    if args.show_fingerprint:
+        if not cfg.get("tls"):
+            print("HTTPS ist nicht aktiviert (mtg-cards-server --enable-tls)", file=sys.stderr)
+            return 1
+        print(tls.fingerprint_file(cfg["tls_cert"]))
+        return 0
 
     if args.export or args.import_file:
         return offline_io(args, args.db or cfg["db_path"])
@@ -45,14 +59,18 @@ def main(argv=None):
     bind = args.bind or cfg["bind"]
     port = args.port or int(cfg["port"])
     db_path = args.db or cfg["db_path"]
+    use_tls = bool(cfg.get("tls"))
     srv = Server(db_path, cfg["token"], bind=bind, port=port, kind="server",
-                 discovery=cfg.get("discovery", True) and not args.no_discovery)
+                 discovery=cfg.get("discovery", True) and not args.no_discovery,
+                 tls_cert=cfg["tls_cert"] if use_tls else None, tls_key=cfg["tls_key"] if use_tls else None)
 
     def _stop(*_):
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _stop)
-    print(f"MTG Cards Server {__version__} läuft auf http://{bind}:{srv.port}", flush=True)
+    print(f"MTG Cards Server {__version__} läuft auf {srv.scheme}://{bind}:{srv.port}", flush=True)
+    if use_tls:
+        print(f"Zertifikats-Fingerabdruck: {srv.ctx.tls_fingerprint}", flush=True)
     print(f"Datenbank: {db_path}", flush=True)
     print(f"Token anzeigen: mtg-cards-server --show-token (Config: {args.config})", flush=True)
     try:
@@ -62,6 +80,50 @@ def main(argv=None):
     finally:
         srv.stop()
     return 0
+
+
+def configure_tls(args, cfg):
+    if args.disable_tls:
+        cfg["tls"] = False
+        config.save(args.config, cfg)
+        print("HTTPS deaktiviert. Neustart: sudo systemctl restart mtg-cards-server")
+        return 0
+    if args.cert or args.key:
+        if not (args.cert and args.key):
+            print("--cert und --key bitte zusammen angeben", file=sys.stderr)
+            return 1
+        cfg["tls_cert"], cfg["tls_key"] = os.path.abspath(args.cert), os.path.abspath(args.key)
+    else:
+        from .netinfo import local_addresses, tailscale_dns_name
+        names = [a["address"] for a in local_addresses()] + [tailscale_dns_name()]
+        try:
+            created = tls.ensure_self_signed(cfg["tls_cert"], cfg["tls_key"], names)
+        except tls.TlsError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        if created:
+            _share_with_service(cfg["tls_cert"], cfg["tls_key"])
+    tls.server_context(cfg["tls_cert"], cfg["tls_key"])  # prüft, ob Zertifikat + Schlüssel passen
+    cfg["tls"] = True
+    config.save(args.config, cfg)
+    print("HTTPS aktiviert.")
+    print(f"Fingerabdruck: {tls.fingerprint_file(cfg['tls_cert'])}")
+    print("Neustart: sudo systemctl restart mtg-cards-server")
+    print("In App und Desktop die Adresse mit https:// eintragen und den Fingerabdruck vergleichen.")
+    return 0
+
+
+def _share_with_service(cert, key):
+    """Schlüssel für den Dienst-Benutzer lesbar machen (root:mtgcards 0640)."""
+    try:
+        import grp
+        gid = grp.getgrnam("mtgcards").gr_gid
+        for path in (os.path.dirname(key), key):
+            os.chown(path, 0, gid)
+        os.chmod(os.path.dirname(key), 0o750)
+        os.chmod(key, 0o640)
+    except (KeyError, PermissionError, OSError):
+        pass
 
 
 def offline_io(args, db_path):

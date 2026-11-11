@@ -31,7 +31,11 @@ DESKTOP_DEFAULTS = {
     "db_path": os.path.join(DESKTOP_DATA_DIR, "cards.db"),
     "remote_url": "",
     "remote_token": "",
+    "remote_fingerprint": "",
     "discovery": True,
+    "tls": False,
+    "tls_cert": os.path.join(os.path.dirname(DESKTOP_CONFIG_PATH), "tls", "cert.pem"),
+    "tls_key": os.path.join(os.path.dirname(DESKTOP_CONFIG_PATH), "tls", "key.pem"),
 }
 
 SERVER_DEFAULTS = {
@@ -40,6 +44,9 @@ SERVER_DEFAULTS = {
     "token": None,
     "db_path": "/var/lib/mtg-cards/cards.db",
     "discovery": True,
+    "tls": False,
+    "tls_cert": "/etc/mtg-cards/tls/cert.pem",
+    "tls_key": "/etc/mtg-cards/tls/key.pem",
 }
 
 

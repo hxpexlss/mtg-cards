@@ -12,7 +12,13 @@ data class Region(val left: Float, val top: Float, val right: Float, val bottom:
     fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
 }
 
-data class ScanResult(val name: String?, val setCode: String?, val collectorNumber: String?)
+data class ScanResult(
+    val name: String?,
+    val setCode: String?,
+    val collectorNumber: String?,
+    /** Weitere Namenskandidaten (z.B. bei Showcase-/randlosen Karten), werden vom Server nacheinander probiert. */
+    val alternatives: List<String> = emptyList(),
+)
 
 /**
  * Wertet OCR-Text einer Magic-Karte aus.
@@ -39,6 +45,16 @@ object CardTextParser {
             .map { cleanName(it.text) }
             .firstOrNull { n -> n.count { it.isLetter() } >= 3 }
 
+        // Erweiterter Bereich (oberes Drittel + Typzeilen-Höhe bei Showcase-Rahmen): größte Schrift zuerst
+        val wideRegion = Region(card.left - 0.04f * w, card.top - 0.05f * h, card.right + 0.04f * w, card.top + 0.30f * h)
+        val alternatives = lines
+            .filter { wideRegion.contains(it.cx, it.cy) }
+            .sortedByDescending { it.bottom - it.top }
+            .map { cleanName(it.text) }
+            .filter { n -> n.count { it.isLetter() } >= 3 && n != name }
+            .distinct()
+            .take(3)
+
         val bottomRegion = Region(card.left - 0.04f * w, card.bottom - 0.13f * h, card.left + 0.65f * w, card.bottom + 0.05f * h)
         val bottom = lines.filter { bottomRegion.contains(it.cx, it.cy) }.joinToString("\n") { it.text }
 
@@ -47,7 +63,8 @@ object CardTextParser {
             ?: CN_RARITY_AFTER.find(bottom)?.groupValues?.get(1)
         val set = SET_LANG.find(bottom.uppercase())?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
 
-        return ScanResult(name?.takeIf { it.isNotBlank() }, set, cn)
+        val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
+        return ScanResult(primary, set, cn, alternatives.filter { it != primary })
     }
 
     /** Entfernt Mana-Symbole/OCR-Müll: behält nur Wörter, die überwiegend aus Buchstaben bestehen. */

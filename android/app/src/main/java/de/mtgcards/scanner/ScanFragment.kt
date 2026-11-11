@@ -122,6 +122,13 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             camera?.cameraControl?.enableTorch(torchOn)
         }
         view.findViewById<Button>(R.id.btnManual).setOnClickListener { manualEntry() }
+        overlay.landscape = Prefs.landscape(requireContext())
+        view.findViewById<ImageButton>(R.id.btnRotate).setOnClickListener {
+            overlay.landscape = !overlay.landscape
+            Prefs.setLandscape(requireContext(), overlay.landscape)
+            voter.reset()
+            status.text = if (overlay.landscape) "Querformat (z.B. Schlachten)" else "Hochformat"
+        }
         view.findViewById<Button>(R.id.btnMinus).setOnClickListener { setQty(quantity - 1) }
         view.findViewById<Button>(R.id.btnPlus).setOnClickListener { setQty(quantity + 1) }
         view.findViewById<Button>(R.id.btnDiscard).setOnClickListener { dismissResult() }
@@ -267,7 +274,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         status.text = "Suche „$name“ …"
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber)
+                val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives)
                 if (autoSwitch.isChecked) addCard(card, 1, foilCheck.isChecked) else showResult(card)
             } catch (e: ApiException) {
                 blockedName = CardTextParser.normalize(name)

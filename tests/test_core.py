@@ -199,6 +199,18 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(res["missing"], 0)
         self.assertEqual(self.call("/api/cards", token=tok)[1]["cards"][0]["price_eur"], "99.00")
 
+        st, res = self.call("/api/decks", "POST", {"name": "Kraum", "list": "Commander\n1 Kraum, Ludevic's Opus\n1 Sol Ring"}, token=tok)
+        self.assertEqual(st, 201)
+        did = res["deck"]["id"]
+        st, deck = self.call(f"/api/decks/{did}/cards", "POST", {"name": "Atraxa", "board": "main"}, token=tok)
+        self.assertEqual(deck["stats"]["outside_identity"], 1)
+        st, txt = self.call(f"/api/decks/{did}/export?missing=1", token=tok)
+        self.assertEqual(st, 200)
+        self.assertEqual(len(self.call("/api/decks", token=tok)[1]["decks"]), 1)
+        dc = deck["cards"][0]["id"]
+        self.assertEqual(self.call(f"/api/deck-cards/{dc}", "DELETE", token=tok)[0], 200)
+        self.assertEqual(self.call(f"/api/decks/{did}", "DELETE", token=tok)[0], 200)
+
         st, html = self.call("/", token=None)
         self.assertIn("MTG Cards", html)
         st, ac = self.call("/api/autocomplete?q=sol", token=tok)

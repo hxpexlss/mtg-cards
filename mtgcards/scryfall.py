@@ -300,7 +300,40 @@ class Scryfall:
             raise
         return data.get("data", [])
 
+    def collection_identifiers(self, identifiers):
+        """Sammelabfrage mit beliebigen Identifiern (z.B. {"name": ...}).
+
+        Gibt (gefundene_karten, nicht_gefundene_identifier) zurück.
+        """
+        found, missing = [], []
+        for i in range(0, len(identifiers), 75):
+            data = self._request(self.base + "/cards/collection", body={"identifiers": identifiers[i:i + 75]})
+            for card in data.get("data", []):
+                found.append(card)
+                self._remember(self.base + f"/cards/{quote(card['id'])}", card)
+            missing += data.get("not_found", [])
+        return found, missing
+
     # -- High-Level-Lookup -----------------------------------------------
+    def lookup_any(self, name=None, alternatives=(), **kw):
+        """Wie lookup(), probiert bei "nicht gefunden" aber weitere Namenskandidaten (vom Scanner)."""
+        try:
+            return self.lookup(name=name, **kw)
+        except ScryfallError as e:
+            if e.status not in (400, 404):
+                raise
+            first = e
+        for alt in alternatives or ():
+            alt = (alt or "").strip()
+            if len(alt) < 3 or alt == name:
+                continue
+            try:
+                return self.lookup(name=alt)
+            except ScryfallError as e:
+                if e.status not in (400, 404):
+                    raise
+        raise first
+
     def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None):
         """Findet eine Karte. Reihenfolge: ID -> Set+Nummer -> Name(+Set) -> fremdsprachiger Name."""
         if scryfall_id:

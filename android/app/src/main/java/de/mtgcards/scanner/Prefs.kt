@@ -19,8 +19,17 @@ object Prefs {
         sp(ctx).edit().putString("pending", value).apply()
     }
 
-    fun saveServer(ctx: Context, url: String, token: String) {
-        sp(ctx).edit().putString("server_url", url).putString("token", token.trim().uppercase()).apply()
+    fun fingerprint(ctx: Context): String = sp(ctx).getString("fingerprint", "") ?: ""
+
+    fun saveServer(ctx: Context, url: String, token: String, fingerprint: String? = null) {
+        val e = sp(ctx).edit().putString("server_url", url).putString("token", token.trim().uppercase())
+        if (fingerprint != null) e.putString("fingerprint", fingerprint)
+        e.apply()
+    }
+
+    fun landscape(ctx: Context): Boolean = sp(ctx).getBoolean("landscape", false)
+    fun setLandscape(ctx: Context, value: Boolean) {
+        sp(ctx).edit().putBoolean("landscape", value).apply()
     }
 
     fun setAutoAdd(ctx: Context, value: Boolean) {

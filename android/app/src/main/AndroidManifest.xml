@@ -32,6 +32,11 @@
             android:exported="false"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".DeckActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
         <!-- ML-Kit-Modell bei Installation bereitstellen -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"

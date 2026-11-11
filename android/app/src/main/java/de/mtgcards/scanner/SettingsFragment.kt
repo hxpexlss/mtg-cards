@@ -5,6 +5,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -36,23 +37,49 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         view.findViewById<Button>(R.id.btnDiscover).setOnClickListener { discover() }
     }
 
-    private fun saveAndTest() {
+    private fun saveAndTest(fingerprint: String? = null) {
         val u = Api.normalizeUrl(url.text.toString())
         val t = token.text.toString().trim().uppercase()
         url.setText(u)
+        val ctx = requireContext()
+        // Fingerabdruck nur behalten, wenn die Adresse gleich bleibt
+        val fp = fingerprint ?: if (u == Prefs.serverUrl(ctx)) Prefs.fingerprint(ctx) else ""
         result.text = "Teste Verbindung …"
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val health = Api(u, t).check()
-                Prefs.saveServer(requireContext(), u, t)
+                val health = Api(u, t, fp).check()
+                Prefs.saveServer(ctx, u, t, fp)
                 val kind = if (health.optString("kind") == "server") "Server" else "PC"
                 val mode = if (health.optString("mode") == "remote") " (leitet an Headless-Server weiter)" else ""
-                result.text = "✓ Verbunden mit $kind „${health.optString("name")}“$mode – Version ${health.optString("version")}"
+                val lock = if (u.startsWith("https")) "🔒 " else ""
+                result.text = "✓ ${lock}Verbunden mit $kind „${health.optString("name")}“$mode – Version ${health.optString("version")}"
             } catch (e: ApiException) {
+                if (e.code == Api.TLS_UNTRUSTED && fingerprint == null) {
+                    confirmFingerprint(u)
+                    return@launch
+                }
                 // trotzdem speichern, damit man es später erneut versuchen kann
-                Prefs.saveServer(requireContext(), u, t)
+                Prefs.saveServer(ctx, u, t, fp)
                 result.text = "✗ ${e.message}" + if (e.code == 401) "\nToken prüfen (am PC unter Einstellungen sichtbar)." else ""
             }
+        }
+    }
+
+    /** Selbstsigniertes Zertifikat: Fingerabdruck anzeigen und bestätigen lassen (einmalig). */
+    private fun confirmFingerprint(u: String) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val fp = try { Tls.fetchFingerprint(u) } catch (e: ApiException) {
+                result.text = "✗ ${e.message}"
+                return@launch
+            }
+            AlertDialog.Builder(requireContext())
+                .setTitle("Zertifikat bestätigen")
+                .setMessage("Der Server verwendet ein eigenes Zertifikat. Stimmt dieser Fingerabdruck mit dem am PC " +
+                    "(⚙ Einstellungen) bzw. „sudo mtg-cards-server --show-fingerprint“ überein?\n\n$fp")
+                .setPositiveButton("Ja, vertrauen") { _, _ -> saveAndTest(fp) }
+                .setNegativeButton("Nein", null)
+                .show()
+            result.text = "Bitte Fingerabdruck vergleichen"
         }
     }
 
@@ -70,6 +97,10 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
                 .setTitle("Gefundene Geräte")
                 .setItems(found.map { it.label }.toTypedArray()) { _, i ->
                     url.setText(found[i].url)
+                    if (found[i].tls) {
+                        Toast.makeText(requireContext(), "Verschlüsselt (HTTPS) – Fingerabdruck wird beim Speichern abgefragt",
+                            Toast.LENGTH_LONG).show()
+                    }
                     result.text = "Adresse übernommen – Token eingeben und „Speichern & testen“ tippen."
                     token.requestFocus()
                 }

@@ -199,11 +199,16 @@ function renderDetail(c) {
       <div class="row">
         ${c.scryfall_uri ? `<a class="btn" href="${esc(c.scryfall_uri)}" target="_blank" rel="noopener">Auf Scryfall öffnen ↗</a>` : ""}
         <button class="btn" data-act="refresh" title="Daten & Preise neu von Scryfall laden">⟳ Aktualisieren</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <select id="cd-decksel" style="max-width:240px"><option value="">Decks laden …</option></select>
+        <button class="btn" data-act="todeck">＋ Zu Deck</button>
         <span class="spacer"></span>
         <button class="btn danger" data-act="delete">Löschen</button>
       </div>
     </div>`;
   const body = $("#cd-body");
+  if (typeof fillDeckSelect === "function") fillDeckSelect($("#cd-decksel"));
   const patch = async (changes) => {
     try {
       const res = await api(`/api/cards/${c.id}`, { method: "PATCH", json: changes });
@@ -225,6 +230,15 @@ function renderDetail(c) {
       if (!confirm(`${c.name} (${c.quantity}×) wirklich löschen?`)) return;
       try { await api(`/api/cards/${c.id}`, { method: "DELETE" }); $("#dlg-card").close(); toast("Gelöscht"); loadCards(); }
       catch (e) { toast(e.message, "err"); }
+    }
+    if (act === "todeck") {
+      const did = $("#cd-decksel").value;
+      if (!did) return toast("Zuerst unter „Decks“ ein Deck anlegen", "err");
+      try {
+        const d = await api(`/api/decks/${did}/cards`, { method: "POST", json: { collection_id: c.id } });
+        toast(`${c.name} → ${d.name}`, "ok");
+      } catch (e) { toast(e.message, "err"); }
+      return;
     }
     if (act === "refresh") {
       try { renderDetail(await api(`/api/cards/${c.id}/refresh`, { method: "POST" })); toast("Aktualisiert", "ok"); loadCards(); }
@@ -394,8 +408,8 @@ async function openSettings() {
   renderSettings(desk, info);
 }
 
-function addrList(addresses, port) {
-  return addresses.map((a) => `<div><span class="addr">http://${esc(a.address)}:${port}</span>
+function addrList(addresses, port, scheme = "http") {
+  return addresses.map((a) => `<div><span class="addr">${scheme}://${esc(a.address)}:${port}</span>
     <span class="muted small">${a.tailscale ? "Tailscale" : esc(a.iface)}</span></div>`).join("");
 }
 
@@ -403,7 +417,8 @@ function renderSettings(desk, info) {
   const body = $("#settings-body");
   let html = "";
   if (desk) {
-    const tsName = desk.tailscale_name ? `<div><span class="addr">http://${esc(desk.tailscale_name)}:${desk.port}</span> <span class="muted small">Tailscale MagicDNS</span></div>` : "";
+    const scheme = desk.tls_active ? "https" : "http";
+    const tsName = desk.tailscale_name ? `<div><span class="addr">${scheme}://${esc(desk.tailscale_name)}:${desk.port}</span> <span class="muted small">Tailscale MagicDNS</span></div>` : "";
     html += `<div class="settings-grid">
       <div class="box">
         <h3>Datenbank</h3>
@@ -427,12 +442,16 @@ function renderSettings(desk, info) {
       <div class="box">
         <h3>Handy-App verbinden</h3>
         <p class="muted small">In der App unter <b>Einstellungen</b> „Im WLAN suchen“ tippen oder eine dieser Adressen eintragen:</p>
-        ${addrList(desk.addresses, desk.port)}${tsName}
+        ${addrList(desk.addresses, desk.port, scheme)}${tsName}
         <h3>Token für die App</h3>
         <div class="token">${esc(desk.local_token)}</div>
         <div class="row" style="margin-top:8px">
           <button class="btn small" id="tok-regen">Neuen Token erzeugen</button>
         </div>
+        <h3>Verschlüsselung</h3>
+        <label class="check"><input type="checkbox" id="tls-toggle" ${desk.tls ? "checked" : ""}> HTTPS für Handy-Verbindung</label>
+        ${desk.tls_fingerprint ? `<div class="muted small">Zertifikats-Fingerabdruck (in der App vergleichen):</div><div class="fp">${esc(desk.tls_fingerprint)}</div>` : ""}
+        ${desk.restart_required ? `<p class="small" style="color:var(--accent2)">⚠ Wird nach einem Neustart der Anwendung aktiv.</p>` : ""}
         ${desk.mode === "remote" ? `<p class="muted small">Im Server-Modus kann die App auch direkt mit dem Headless-Server verbunden werden (empfohlen).</p>` : ""}
       </div>
     </div>`;
@@ -440,7 +459,8 @@ function renderSettings(desk, info) {
   if (info && (!desk || desk.mode === "remote")) {
     html += `<div class="box" style="margin-top:16px">
       <h3>${info.kind === "server" ? "Verbundener Server" : "Server"}: ${esc(info.name)} (v${esc(info.version)})</h3>
-      ${addrList(info.addresses || [], info.port)}
+      ${addrList(info.addresses || [], info.port, info.tls ? "https" : "http")}
+      ${info.tls_fingerprint ? `<div class="muted small">Fingerabdruck:</div><div class="fp">${esc(info.tls_fingerprint)}</div>` : ""}
       ${info.tailscale_name ? `<div><span class="addr">http://${esc(info.tailscale_name)}:${info.port}</span> <span class="muted small">Tailscale MagicDNS</span></div>` : ""}
       <p class="muted small">${info.stats.cards} Karten in der Datenbank.</p>
     </div>`;
@@ -469,7 +489,14 @@ function renderSettings(desk, info) {
         if ($("#rm-token").value.trim()) payload.remote_token = $("#rm-token").value.trim();
       }
       try {
-        const r = await api("/api/desktop/settings", { method: "POST", json: payload });
+        let r = await api("/api/desktop/settings", { method: "POST", json: payload });
+        if (!r.ok && r.needs_trust) {
+          const yes = confirm("Der Server nutzt ein selbstsigniertes Zertifikat.\n\nFingerabdruck:\n" + r.fingerprint +
+            "\n\nStimmt er mit der Ausgabe von „sudo mtg-cards-server --show-fingerprint“ überein?");
+          if (!yes) { msg.textContent = "✗ Abgebrochen"; return; }
+          payload.remote_fingerprint = r.fingerprint;
+          r = await api("/api/desktop/settings", { method: "POST", json: payload });
+        }
         if (!r.ok) { msg.textContent = "✗ " + r.error; return; }
         msg.textContent = "✓ Gespeichert";
         toast(mode === "remote" ? "Mit Server verbunden" : "Lokale Datenbank aktiv", "ok");
@@ -477,6 +504,12 @@ function renderSettings(desk, info) {
         loadCards();
         openSettings();
       } catch (e) { msg.textContent = "✗ " + e.message; }
+    };
+    $("#tls-toggle").onchange = async (e) => {
+      const r = await api("/api/desktop/settings", { method: "POST", json: { tls: e.target.checked } });
+      if (!r.ok) { toast(r.error, "err"); e.target.checked = !e.target.checked; return; }
+      toast(e.target.checked ? "HTTPS aktiviert – Anwendung neu starten" : "HTTPS deaktiviert – Anwendung neu starten", "ok");
+      renderSettings(r, info);
     };
     $("#tok-regen").onclick = async () => {
       if (!confirm("Neuen Token erzeugen? Die Handy-App muss danach neu verbunden werden.")) return;
@@ -502,6 +535,7 @@ async function poll() {
       const latest = await api("/api/cards?sort=updated&limit=1");
       if (latest.cards[0]) toast(`Aktualisiert: ${latest.cards[0].name} (${latest.cards[0].quantity}×)`);
       await loadCards();
+      if (typeof onRevisionChange === "function") onRevisionChange();
     }
     state.revision = revision;
   } catch (_) { /* nächster Versuch */ }

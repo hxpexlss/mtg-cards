@@ -11,8 +11,11 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 
-data class FoundServer(val name: String, val address: String, val port: Int, val kind: String) {
-    val url get() = "http://$address:$port"
+data class FoundServer(
+    val name: String, val address: String, val port: Int, val kind: String,
+    val tls: Boolean = false, val fingerprint: String = "",
+) {
+    val url get() = "${if (tls) "https" else "http"}://$address:$port"
     val label get() = "$name (${if (kind == "server") "Server" else "PC"}) – $address:$port"
 }
 
@@ -52,7 +55,10 @@ object Discovery {
                     if (j.optString("app") != "mtg-cards") continue
                     val addr = packet.address.hostAddress ?: continue
                     val port = j.optInt("port", Api.DEFAULT_PORT)
-                    result["$addr:$port"] = FoundServer(j.optString("name", addr), addr, port, j.optString("kind"))
+                    result["$addr:$port"] = FoundServer(
+                        j.optString("name", addr), addr, port, j.optString("kind"),
+                        j.optBoolean("tls"), if (j.isNull("fingerprint")) "" else j.optString("fingerprint"),
+                    )
                 } catch (_: JSONException) {
                 }
             }

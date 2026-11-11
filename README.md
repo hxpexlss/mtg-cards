@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.1.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.2.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.1.0_all.deb
+sudo apt install ./mtg-cards-server_1.2.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -75,8 +75,8 @@ Unter **Verbindung** → „Im WLAN suchen“ oder Adresse eintragen, Token eing
   MagicDNS-Namen (`mein-server.tailxxxx.ts.net`) eintragen. Die Desktop-Einstellungen zeigen beides an.
   Damit ist die Datenbank von überall erreichbar, ohne Ports im Router zu öffnen.
 - Alle API-Zugriffe sind mit einem Token geschützt (Format `XXXX-XXXX-XXXX-XXXX`).
-  Die Verbindung ist unverschlüsselt (HTTP) – im Heimnetz und über Tailscale (WireGuard-verschlüsselt) ist das in
-  Ordnung; **den Port nicht direkt ins Internet freigeben**.
+  Standardmäßig HTTP – im Heimnetz und über Tailscale (WireGuard-verschlüsselt) ist das in Ordnung; optional
+  HTTPS (siehe unten). **Den Port nicht direkt ins Internet freigeben**.
 
 ## Scannen
 
@@ -90,6 +90,9 @@ damit der richtige Druck gespeichert wird. Funktioniert auch mit deutschen (und 
 - **Verlauf** der Sitzung unten: Karte antippen → Rückgängig (−1), +1 Exemplar oder Details
 - **Offline-Warteschlange**: Ist PC/Server nicht erreichbar, werden Scans gespeichert und automatisch nachgetragen,
   sobald die Verbindung wieder da ist (oder Hinweis antippen)
+- Mehrere Namenskandidaten pro Scan: Liegt der Name nicht an der üblichen Stelle (Showcase-, randlose oder
+  Sonderrahmen), probiert der Server automatisch die weiteren erkannten Zeilen
+- **Querformat-Rahmen** (Drehen-Symbol) für quer gedruckte Karten wie Schlachten
 - Bildschirm antippen = scharfstellen, zwei Finger = zoomen, Blitz-Symbol = Taschenlampe
 - „Name manuell eingeben“, falls die Erkennung nicht klappt
 
@@ -106,6 +109,50 @@ In der Desktop-/Weboberfläche unter **⇅ Import/Export**:
 
 Scryfall-Antworten werden in `scryfall-cache.db` neben der Datenbank zwischengespeichert: wiederholte Scans sind
 sofort da, und bereits bekannte Karten lassen sich auch ohne Internet nachschlagen.
+
+## Decks
+
+Tab **Decks** in der Desktop-/Weboberfläche:
+
+- **Neues Deck** → Name und optional eine Deckliste einfügen. Verstanden werden die üblichen Formate von Moxfield,
+  Archidekt, MTG Arena und MTGO (`1 Sol Ring`, `1x Sol Ring`, `1 Sol Ring (C21) 263`, Abschnitte `Commander`,
+  `Deck`, `Sideboard`, Markierung `*CMDR*`).
+- Jede Karte zeigt **✓ vorhanden** oder **✗ fehlt** (Abgleich mit der Sammlung über alle Drucke). Standardländer
+  zählen nie als fehlend.
+- Mit Commander wird die **Farbidentität geprüft** – Karten außerhalb werden mit ⚠ markiert.
+- **Fehlende kopieren** erzeugt eine Einkaufsliste; **Exportieren** speichert die Deckliste als Text.
+- Karten einzeln hinzufügen (Name mit Vorschlägen), Anzahl ±, als Commander ★ oder ins Sideboard ⇄ verschieben.
+- In den Kartendetails der Sammlung: **＋ Zu Deck**.
+- In der App: Tab **Decks** mit Fortschritt, „Nur fehlende“ und **Fehlende teilen** (z.B. per Messenger).
+
+Decks sind im JSON-Export enthalten und werden beim Import wiederhergestellt.
+
+## Verschlüsselung (HTTPS)
+
+Standardmäßig wird unverschlüsseltes HTTP genutzt (im Heimnetz und über Tailscale in Ordnung). Optional:
+
+**Headless-Server**
+
+```sh
+sudo mtg-cards-server --enable-tls            # erzeugt ein eigenes Zertifikat
+sudo systemctl restart mtg-cards-server
+sudo mtg-cards-server --show-fingerprint      # Fingerabdruck zum Vergleichen
+```
+
+Mit echtem Zertifikat von Tailscale (dann ist keine Bestätigung nötig):
+
+```sh
+sudo tailscale cert mein-server.tailxxxx.ts.net
+sudo mtg-cards-server --enable-tls --cert mein-server.tailxxxx.ts.net.crt --key mein-server.tailxxxx.ts.net.key
+```
+
+(Die Dateien müssen für den Dienst-Benutzer `mtgcards` lesbar sein, z.B. nach `/etc/mtg-cards/tls/` kopieren.)
+
+**Desktop**: ⚙ Einstellungen → „HTTPS für Handy-Verbindung“, danach die Anwendung neu starten.
+
+In der App und im Desktop-Server-Modus die Adresse mit `https://` eintragen. Beim ersten Verbinden wird der
+Zertifikats-Fingerabdruck angezeigt – mit dem am PC/Server angezeigten vergleichen und bestätigen. Danach wird
+er bei jeder Verbindung geprüft; ändert sich das Zertifikat, verweigert die App die Verbindung.
 
 ## Suche
 
@@ -144,6 +191,10 @@ Header `Authorization: Bearer <TOKEN>`.
 | GET | `/api/lookup?name=&set=&cn=` | Karte bei Scryfall nachschlagen (inkl. Bestand) |
 | GET | `/api/autocomplete?q=`, `/api/prints?name=` | Namensvorschläge, Drucke |
 | GET | `/api/export?format=json\|csv` | Export |
+| GET/POST | `/api/decks` | Decks auflisten / anlegen (`{name, list}`) |
+| GET/PATCH/DELETE | `/api/decks/{id}` | Deck inkl. Abgleich mit der Sammlung |
+| POST | `/api/decks/{id}/import`, `/api/decks/{id}/cards` | Deckliste einfügen, Karte hinzufügen |
+| GET | `/api/decks/{id}/export?missing=1` | Deckliste / fehlende Karten als Text |
 | POST | `/api/import?mode=add\|replace` | Import (JSON/CSV im Body) |
 
 Hinweis zur App-Signatur: Die APK wird mit einem im Repository liegenden, nicht geheimen Schlüssel

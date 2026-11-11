@@ -17,8 +17,10 @@ from urllib.request import Request, urlopen
 
 from . import APP_NAME, __version__
 from .db import Database
+from .decks import DeckStore
 from .importexport import export_csv, export_json, import_cards
 from .netinfo import DiscoveryResponder, local_addresses, tailscale_dns_name
+from . import tls
 from .scryfall import Scryfall, ScryfallError, normalize_card
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -36,16 +38,19 @@ class AppContext:
 
     def __init__(self, db, scryfall, token, kind="server", port=None, desktop=None):
         self.db = db
+        self.decks = DeckStore(db)
         self.scryfall = scryfall
         self.token = token
         self.kind = kind            # "server" oder "desktop"
         self.port = port
         self.desktop = desktop      # DesktopSettings-Objekt (nur Desktop)
+        self.tls_fingerprint = None
 
     def remote(self):
-        """(url, token) wenn der Desktop im Remote-Modus läuft, sonst None."""
-        if self.desktop and self.desktop.cfg.get("mode") == "remote" and self.desktop.cfg.get("remote_url"):
-            return self.desktop.cfg["remote_url"].rstrip("/"), self.desktop.cfg.get("remote_token", "")
+        """(url, token, fingerprint) wenn der Desktop im Remote-Modus läuft, sonst None."""
+        cfg = self.desktop.cfg if self.desktop else {}
+        if cfg.get("mode") == "remote" and cfg.get("remote_url"):
+            return cfg["remote_url"].rstrip("/"), cfg.get("remote_token", ""), cfg.get("remote_fingerprint") or None
         return None
 
 
@@ -203,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- Remote-Proxy (Desktop im Remote-Modus) ----------------------------------
     def proxy(self, remote, method, url):
-        base, token = remote
+        base, token, fingerprint = remote
         body = self.read_body() if method in ("POST", "PATCH") else None
         target = base + url.path + (("?" + url.query) if url.query else "")
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -211,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             headers["Content-Type"] = self.headers["Content-Type"]
         req = Request(target, data=body, method=method, headers=headers)
         try:
-            with urlopen(req, timeout=120) as resp:
+            with tls.urlopen(req, timeout=120, fingerprint=fingerprint) as resp:
                 data = resp.read()
                 status = resp.status
                 ctype = resp.headers.get("Content-Type", "application/json")
@@ -259,6 +264,7 @@ class Handler(BaseHTTPRequestHandler):
             "app": APP_NAME, "version": __version__, "kind": self.ctx.kind,
             "name": socket.gethostname(), "auth_required": bool(self.ctx.token),
             "mode": "remote" if remote else "local",
+            "tls": bool(self.ctx.tls_fingerprint),
         }
 
 
@@ -278,6 +284,7 @@ def r_info(h, qs):
     h.send_json({
         **h.health(),
         "port": h.ctx.port,
+        "tls_fingerprint": h.ctx.tls_fingerprint,
         "addresses": local_addresses(),
         "tailscale_name": tailscale_dns_name(),
         "stats": db.stats(),
@@ -316,8 +323,12 @@ def r_get(h, qs, cid):
 
 
 def _lookup_from(h, data):
-    return h.ctx.scryfall.lookup(
+    alts = data.get("alt") or []
+    if isinstance(alts, str):
+        alts = [alts]
+    return h.ctx.scryfall.lookup_any(
         name=(data.get("name") or "").strip() or None,
+        alternatives=alts,
         set_code=data.get("set") or data.get("set_code"),
         collector_number=data.get("cn") or data.get("collector_number"),
         lang=data.get("lang"),
@@ -327,7 +338,8 @@ def _lookup_from(h, data):
 
 def r_lookup(h, qs):
     data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id")}
-    if not any(data.values()):
+    data["alt"] = qs.get("alt", [])
+    if not any(v for k, v in data.items() if k != "alt"):
         raise ApiError(400, "name oder id angeben")
     card = normalize_card(_lookup_from(h, data))
     card["owned"] = h.ctx.db.find_owned(card["scryfall_id"], card["oracle_id"])
@@ -432,7 +444,97 @@ def r_import(h, qs):
     h.send_json(result)
 
 
+# -- Decks ---------------------------------------------------------------------
+
+def _deck_or_404(deck):
+    if deck is None:
+        raise ApiError(404, "Deck nicht gefunden")
+    return deck
+
+
+def r_decks(h, qs):
+    h.send_json({"decks": h.ctx.decks.list()})
+
+
+def r_deck_create(h, qs):
+    data = h.read_json()
+    try:
+        deck = h.ctx.decks.create(data.get("name"), data.get("format") or "commander", data.get("notes") or "")
+    except ValueError as e:
+        raise ApiError(400, str(e)) from None
+    result = {"deck": deck, "errors": []}
+    if (data.get("list") or "").strip():
+        res = h.ctx.decks.import_list(deck["id"], h.ctx.scryfall, data["list"])
+        result = {"deck": res["deck"], "errors": res["errors"]}
+    h.send_json(result, 201)
+
+
+def r_deck_get(h, qs, did):
+    h.send_json(_deck_or_404(h.ctx.decks.get(_card_id(did))))
+
+
+def r_deck_patch(h, qs, did):
+    h.send_json(_deck_or_404(h.ctx.decks.update(_card_id(did), h.read_json())))
+
+
+def r_deck_delete(h, qs, did):
+    if not h.ctx.decks.delete(_card_id(did)):
+        raise ApiError(404, "Deck nicht gefunden")
+    h.send_json({"deleted": True})
+
+
+def r_deck_import(h, qs, did):
+    data = h.read_json()
+    try:
+        res = h.ctx.decks.import_list(_card_id(did), h.ctx.scryfall, data.get("text") or "",
+                                      replace=bool(data.get("replace")))
+    except ValueError as e:
+        raise ApiError(400, str(e)) from None
+    h.send_json(_deck_or_404(res))
+
+
+def r_deck_add_card(h, qs, did):
+    data = h.read_json()
+    card = None
+    if data.get("collection_id"):
+        card = h.ctx.db.get(_card_id(str(data["collection_id"])))
+        if card is None:
+            raise ApiError(404, "Karte nicht in der Sammlung")
+    else:
+        if not (data.get("name") or data.get("scryfall_id")):
+            raise ApiError(400, "name, scryfall_id oder collection_id angeben")
+        card = normalize_card(_lookup_from(h, data))
+    deck = h.ctx.decks.set_card(_card_id(did), card, int(data.get("quantity") or 1),
+                                data.get("board") or "main", add=data.get("add", True))
+    h.send_json(_deck_or_404(deck))
+
+
+def r_deck_card_patch(h, qs, cid):
+    h.send_json(_deck_or_404(h.ctx.decks.update_card(_card_id(cid), h.read_json())))
+
+
+def r_deck_card_delete(h, qs, cid):
+    h.send_json(_deck_or_404(h.ctx.decks.remove_card(_card_id(cid))))
+
+
+def r_deck_export(h, qs, did):
+    text = h.ctx.decks.export_text(_card_id(did), only_missing=_first(qs, "missing") in ("1", "true"))
+    if text is None:
+        raise ApiError(404, "Deck nicht gefunden")
+    h.send_bytes(text.encode("utf-8"), "text/plain; charset=utf-8")
+
+
 ROUTES = [
+    ("GET", r"/api/decks", r_decks),
+    ("POST", r"/api/decks", r_deck_create),
+    ("GET", r"/api/decks/(\d+)", r_deck_get),
+    ("PATCH", r"/api/decks/(\d+)", r_deck_patch),
+    ("DELETE", r"/api/decks/(\d+)", r_deck_delete),
+    ("POST", r"/api/decks/(\d+)/import", r_deck_import),
+    ("POST", r"/api/decks/(\d+)/cards", r_deck_add_card),
+    ("GET", r"/api/decks/(\d+)/export", r_deck_export),
+    ("PATCH", r"/api/deck-cards/(\d+)", r_deck_card_patch),
+    ("DELETE", r"/api/deck-cards/(\d+)", r_deck_card_delete),
     ("GET", r"/api/info", r_info),
     ("GET", r"/api/revision", r_revision),
     ("GET", r"/api/stats", r_stats),
@@ -452,26 +554,41 @@ ROUTES = [
 ]
 
 
-def test_remote(url, token):
+def test_remote(url, token, fingerprint=None):
+    """Prüft Erreichbarkeit und Token eines Servers.
+
+    Bei HTTPS mit selbstsigniertem Zertifikat ohne bekannten Fingerabdruck wird
+    {"ok": False, "needs_trust": True, "fingerprint": ...} zurückgegeben – der Benutzer muss bestätigen.
+    """
     url = (url or "").strip().rstrip("/")
     if not url:
         return {"ok": False, "error": "Keine Server-Adresse angegeben"}
     if not re.match(r"^https?://", url):
         url = "http://" + url
     try:
-        with urlopen(Request(url + "/api/health"), timeout=5) as r:
+        with tls.urlopen(Request(url + "/api/health"), timeout=5, fingerprint=fingerprint) as r:
             health = json.loads(r.read().decode())
         if health.get("app") != APP_NAME:
             return {"ok": False, "error": "Gegenstelle ist kein MTG-Cards-Server"}
         req = Request(url + "/api/revision", headers={"Authorization": f"Bearer {token}"})
-        with urlopen(req, timeout=5):
+        with tls.urlopen(req, timeout=5, fingerprint=fingerprint):
             pass
-        return {"ok": True, "url": url, "health": health}
+        return {"ok": True, "url": url, "health": health, "fingerprint": fingerprint}
     except HTTPError as e:
         if e.code == 401:
             return {"ok": False, "error": "Server erreichbar, aber Token falsch"}
         return {"ok": False, "error": f"HTTP {e.code}"}
     except (URLError, OSError, ValueError) as e:
+        if url.startswith("https://") and not fingerprint and tls.is_cert_verify_error(e):
+            parsed = urlparse(url)
+            try:
+                fp = tls.fetch_fingerprint(parsed.hostname, parsed.port or 443)
+            except OSError as e2:
+                return {"ok": False, "error": f"Nicht erreichbar: {e2}"}
+            return {"ok": False, "needs_trust": True, "fingerprint": fp, "url": url,
+                    "error": "Selbstsigniertes Zertifikat – Fingerabdruck bestätigen"}
+        if "Fingerabdruck" in str(e):
+            return {"ok": False, "error": "Zertifikat hat sich geändert! " + str(e)}
         return {"ok": False, "error": f"Nicht erreichbar: {e}"}
 
 
@@ -482,43 +599,79 @@ def cache_path_for(db_path):
     return os.path.join(os.path.dirname(os.path.abspath(db_path)), "scryfall-cache.db")
 
 
+class QuietHTTPServer(ThreadingHTTPServer):
+    """Keine Tracebacks bei abgebrochenen Verbindungen / fehlgeschlagenen TLS-Handshakes."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        import ssl
+        import sys
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ssl.SSLError, ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class Server:
-    """Startet HTTP-Server (+ optional UDP-Discovery) in Hintergrund-Threads."""
+    """Startet HTTP(S)-Server (+ optional UDP-Discovery) in Hintergrund-Threads.
+
+    tls_cert/tls_key: HTTPS aktivieren.
+    local_http: zusätzlicher unverschlüsselter Listener nur auf 127.0.0.1 (für das Desktop-Fenster).
+    """
 
     def __init__(self, db_path, token, bind="0.0.0.0", port=8765, kind="server",
-                 discovery=True, desktop=None, scryfall=None):
+                 discovery=True, desktop=None, scryfall=None, tls_cert=None, tls_key=None,
+                 local_http=False):
         self.db = Database(db_path)
         if scryfall is None:
             scryfall = Scryfall(cache_path=cache_path_for(db_path))
         self.ctx = AppContext(self.db, scryfall, token, kind=kind,
                               port=port, desktop=desktop)
         handler = type("BoundHandler", (Handler,), {"ctx": self.ctx})
-        ThreadingHTTPServer.allow_reuse_address = True
-        self.httpd = ThreadingHTTPServer((bind, port), handler)
-        self.httpd.daemon_threads = True
+        self.httpd = QuietHTTPServer((bind, port), handler)
+        self.servers = [self.httpd]
+        self.local_port = None
+        if tls_cert and tls_key:
+            tls.wrap_server_socket(self.httpd, tls_cert, tls_key)
+            self.ctx.tls_fingerprint = tls.fingerprint_file(tls_cert)
+            if local_http:
+                local = QuietHTTPServer(("127.0.0.1", 0), handler)
+                self.servers.append(local)
+                self.local_port = local.server_address[1]
         self.ctx.port = self.httpd.server_address[1]
-        self.discovery = DiscoveryResponder(self.ctx.port, kind) if discovery else None
-        self._thread = None
+        self.discovery = DiscoveryResponder(self.ctx.port, kind, tls_fingerprint=self.ctx.tls_fingerprint) \
+            if discovery else None
+        self._threads = []
 
     @property
     def port(self):
         return self.ctx.port
 
+    @property
+    def scheme(self):
+        return "https" if self.ctx.tls_fingerprint else "http"
+
     def start(self):
         if self.discovery:
             self.discovery.start()
-        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True, name="http")
-        self._thread.start()
+        for srv in self.servers:
+            t = threading.Thread(target=srv.serve_forever, daemon=True, name="http")
+            t.start()
+            self._threads.append(t)
         return self
 
     def serve_forever(self):
         if self.discovery:
             self.discovery.start()
+        for srv in self.servers[1:]:
+            threading.Thread(target=srv.serve_forever, daemon=True, name="http").start()
         self.httpd.serve_forever()
 
     def stop(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
         if self.discovery:
             self.discovery.stop()
         self.db.close()

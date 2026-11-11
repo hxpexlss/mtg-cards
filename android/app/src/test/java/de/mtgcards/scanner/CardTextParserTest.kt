@@ -40,6 +40,18 @@ class CardTextParserTest {
     }
 
     @Test
+    fun showcaseNameLowerUsesAlternatives() {
+        // Name nicht im üblichen Bereich, sondern etwas tiefer (z.B. Showcase-Rahmen)
+        val lines = listOf(
+            line("Sheoldred, the Apocalypse", 150, 390, 600, 440),
+            line("Phyrexian Praetor", 150, 450, 400, 470),
+        )
+        val r = CardTextParser.parse(lines, card)
+        assertEquals("Sheoldred the Apocalypse", r.name)
+        assertEquals(listOf("Phyrexian Praetor"), r.alternatives)
+    }
+
+    @Test
     fun nothingInFrame() {
         val r = CardTextParser.parse(listOf(line("Irgendwas", 0, 0, 50, 20)), card)
         assertNull(r.name)

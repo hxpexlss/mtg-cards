@@ -20,6 +20,14 @@ class GuideOverlayView @JvmOverloads constructor(
     var cardRect: RectF? = null
         private set
 
+    /** Querformat-Rahmen für Karten, die quer gedruckt sind (Schlachten u.ä.). */
+    var landscape: Boolean = false
+        set(value) {
+            field = value
+            computeRect(width, height)
+            invalidate()
+        }
+
     var active: Boolean = false
         set(value) {
             field = value
@@ -45,8 +53,14 @@ class GuideOverlayView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        val cardW = min(w * 0.84f, h * 0.68f * 63f / 88f)
-        val cardH = cardW * 88f / 63f
+        computeRect(w, h)
+    }
+
+    private fun computeRect(w: Int, h: Int) {
+        if (w == 0 || h == 0) return
+        val ratio = if (landscape) 88f / 63f else 63f / 88f   // Breite / Höhe
+        val cardW = min(w * (if (landscape) 0.94f else 0.84f), h * 0.68f * ratio)
+        val cardH = cardW / ratio
         val left = (w - cardW) / 2f
         val top = (h - cardH) / 2f - h * 0.04f
         cardRect = RectF(left, top, left + cardW, top + cardH)
