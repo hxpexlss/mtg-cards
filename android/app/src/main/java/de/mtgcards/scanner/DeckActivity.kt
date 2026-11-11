@@ -38,6 +38,9 @@ class DeckActivity : AppCompatActivity() {
             deck?.let { d -> render(d) }
         }
         findViewById<Button>(R.id.deckShare).setOnClickListener { shareMissing() }
+        findViewById<Button>(R.id.deckProxies).setOnClickListener {
+            ProxyPdf.ask(this, lifecycleScope, "/api/decks/$deckId/proxies.pdf?missing=1", "proxies-deck-$deckId.pdf")
+        }
     }
 
     override fun onResume() {

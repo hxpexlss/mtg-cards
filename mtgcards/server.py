@@ -649,7 +649,58 @@ def r_deck_to_wishlist(h, qs, did):
     h.send_json({"added": added})
 
 
+# -- Proxies (PDF) -----------------------------------------------------------------
+
+def _proxy_cache_dir(h):
+    path = h.ctx.db.path
+    return None if path == ":memory:" else os.path.join(os.path.dirname(os.path.abspath(path)), "proxy-images")
+
+
+def _send_proxies(h, qs, items, title, filename):
+    from . import proxies
+    if not items:
+        raise ApiError(400, "Keine Karten ausgewählt")
+    entries, errors = proxies.collect_entries(h.ctx.scryfall, items, _proxy_cache_dir(h),
+                                              fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image))
+    if not entries:
+        raise ApiError(404, "Keine Karten gefunden: " + "; ".join(errors))
+    try:
+        gap = float(_first(qs, "gap", "0").replace(",", "."))
+    except ValueError:
+        gap = 0.0
+    pdf = proxies.build_pdf(entries, paper=_first(qs, "paper", "a4"), cut_marks=_first(qs, "cut", "1") != "0",
+                            gap_mm=gap, title=title)
+    h.send_bytes(pdf, "application/pdf", filename=filename)
+
+
+def r_wish_proxies(h, qs):
+    """Proxy-PDF aus der Wunschliste. ids=1,2,3 (leer = alle); copies=wish (Anzahl) oder one."""
+    wanted = {int(x) for x in _first(qs, "ids").split(",") if x.strip().isdigit()}
+    one = _first(qs, "copies", "wish") == "one"
+    items = [{"name": w["name"], "scryfall_id": w["scryfall_id"], "copies": 1 if one else w["quantity"]}
+             for w in h.ctx.wishlist.list()["items"] if not wanted or w["id"] in wanted]
+    _send_proxies(h, qs, items, "MTG Cards Proxies - Wunschliste", "proxies-wunschliste.pdf")
+
+
+def r_deck_proxies(h, qs, did):
+    """Proxy-PDF für ein Deck: missing=1 (Standard) nur fehlende Karten, sonst alle."""
+    deck = _deck_or_404(h.ctx.decks.get(_card_id(did)))
+    only_missing = _first(qs, "missing", "1") != "0"
+    one = _first(qs, "copies", "") == "one"
+    items = []
+    for c in deck["cards"]:
+        if c["board"] not in ("commander", "main") or (c["basic"] and only_missing):
+            continue
+        n = c["missing"] if only_missing else c["quantity"]
+        if n > 0:
+            items.append({"name": c["name"], "copies": 1 if one else n})
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", deck["name"]).strip("-") or "deck"
+    _send_proxies(h, qs, items, f"MTG Cards Proxies - {deck['name']}", f"proxies-{safe}.pdf")
+
+
 ROUTES = [
+    ("GET", r"/api/wishlist/proxies\.pdf", r_wish_proxies),
+    ("GET", r"/api/decks/(\d+)/proxies\.pdf", r_deck_proxies),
     ("GET", r"/api/wishlist", r_wish_list),
     ("POST", r"/api/wishlist", r_wish_add),
     ("POST", r"/api/wishlist/refresh", r_wish_refresh),

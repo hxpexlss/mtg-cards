@@ -27,6 +27,13 @@
             android:text="＋ Karte wünschen" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/wishProxies"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🖨 Proxies drucken (PDF, 9 pro Seite)" />
+
     <TextView
         android:id="@+id/wishInfo"
         android:layout_width="match_parent"

@@ -69,6 +69,13 @@
                     android:text="Fehlende teilen" />
             </LinearLayout>
 
+            <Button
+                android:id="@+id/deckProxies"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🖨 Fehlende als Proxies (PDF)" />
+
             <LinearLayout
                 android:id="@+id/deckCards"
                 android:layout_width="match_parent"

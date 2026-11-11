@@ -78,6 +78,7 @@ function renderDeck(d) {
       <button class="btn small" data-dact="import">⇩ Liste einfügen</button>
       <button class="btn small" data-dact="missing">Fehlende kopieren</button>
       ${st.missing ? `<button class="btn small" data-dact="towish">Fehlende → Wunschliste</button>` : ""}
+      <button class="btn small" data-dact="proxies">🖨 Proxies</button>
       <a class="btn small" href="/api/decks/${d.id}/export?token=${t}" download="${esc(d.name)}.txt">Exportieren</a>
       <button class="btn small" data-dact="rename">Umbenennen</button>
       <button class="btn small danger" data-dact="delete">Löschen</button>
@@ -190,6 +191,12 @@ async function deckAction(act) {
       catch (_) { /* Zwischenablage nicht erlaubt */ }
       showText(`Fehlende Karten – ${d.name}`, text);
     } catch (e) { toast(e.message, "err"); }
+  }
+  if (act === "proxies") {
+    const n = d.stats.missing;
+    openProxyDialog({ title: `Proxies – ${d.name}`, url: `/api/decks/${d.id}/proxies.pdf`,
+      info: n ? `Fehlende Karten: ${n} (≈ ${Math.ceil(n / 9)} ${Math.ceil(n / 9) === 1 ? "Seite" : "Seiten"})` : "Es fehlen keine Karten" });
+    return;
   }
   if (act === "towish") {
     toast("Suche günstigste Drucke …");

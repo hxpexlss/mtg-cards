@@ -44,6 +44,16 @@
             android:screenOrientation="portrait"
             android:parentActivityName=".MainActivity" />
 
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- ML-Kit-Modell bei Installation bereitstellen -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"

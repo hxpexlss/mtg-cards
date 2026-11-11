@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.4.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.5.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.4.0_all.deb
+sudo apt install ./mtg-cards-server_1.5.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -171,6 +171,19 @@ Tab **Wunschliste** (PC) bzw. **Wünsche** (App):
   entfernt).
 - Im Deck: **Fehlende → Wunschliste** setzt alle fehlenden Karten mit aktuellem Bestpreis auf die Liste.
 - Die Wunschliste ist im JSON-Export enthalten.
+
+## Proxies drucken
+
+Aus der **Wunschliste** (alle oder ausgewählte Karten) oder aus einem **Deck** (fehlende Karten) eine druckfertige
+PDF erzeugen – am PC über „🖨 Proxies drucken“, in der App über den gleichnamigen Knopf (öffnen, drucken, teilen):
+
+- **9 Karten pro Seite** (3 × 3) in Originalgröße **63,5 × 88,9 mm** – passt in Standard-Sleeves
+- A4 oder US Letter, Schnittmarken, optional Abstand zwischen den Karten
+- Anzahl wie auf der Wunschliste / im Deck fehlend oder 1 je Karte
+- Doppelseitige Karten erhalten beide Seiten; ist kein Bild verfügbar, wird eine Text-Proxy gedruckt
+- Beim Drucken **„Tatsächliche Größe“ / 100 %** wählen
+- Kartenbilder werden zwischengespeichert (`proxy-images/` neben der Datenbank). Nur für Playtests und den privaten
+  Gebrauch.
 
 ## Stapel-Scan
 

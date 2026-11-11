@@ -134,6 +134,32 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun decks() = json("GET", "/api/decks")
 
+    /** Binärdaten laden (z.B. Proxy-PDF). */
+    suspend fun download(path: String): ByteArray = withContext(Dispatchers.IO) {
+        if (baseUrl.isBlank()) throw ApiException("Kein Server eingestellt", NOT_CONFIGURED)
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL(baseUrl + path).openConnection() as HttpURLConnection
+            if (conn is HttpsURLConnection) Tls.configure(conn, fingerprint)
+            conn.connectTimeout = 6000
+            conn.readTimeout = 180000          // Kartenbilder werden serverseitig geladen
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val text = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                val msg = try { JSONObject(text).optString("error") } catch (e: Exception) { "" }
+                throw ApiException(msg.ifBlank { "HTTP-Fehler $code" }, code)
+            }
+            conn.inputStream.use { it.readBytes() }
+        } catch (e: SSLException) {
+            throw ApiException("Zertifikat des Servers ist nicht vertrauenswürdig", TLS_UNTRUSTED)
+        } catch (e: IOException) {
+            throw ApiException("Server nicht erreichbar (${e.message ?: e.javaClass.simpleName})")
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
     suspend fun wishlist() = json("GET", "/api/wishlist")
 
     suspend fun wishAdd(name: String, maxPrice: String, quantity: Int = 1) = json("POST", "/api/wishlist", JSONObject().apply {

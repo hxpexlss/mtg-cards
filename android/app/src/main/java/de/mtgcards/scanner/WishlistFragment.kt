@@ -41,6 +41,10 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             adapter = this@WishlistFragment.adapter
         }
         view.findViewById<Button>(R.id.wishAdd).setOnClickListener { addWish() }
+        view.findViewById<Button>(R.id.wishProxies).setOnClickListener {
+            ProxyPdf.ask(requireContext(), viewLifecycleOwner.lifecycleScope, "/api/wishlist/proxies.pdf",
+                "proxies-wunschliste.pdf")
+        }
         PriceAlertWorker.schedule(requireContext())
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(requireContext(),
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

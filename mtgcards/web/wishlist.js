@@ -29,6 +29,7 @@ function renderWishlist(r) {
       <span class="muted">${r.items.length} Karten · aktuell ${esc(fmtEur(r.total_eur))}</span>
       <span class="spacer"></span>
       <button class="btn small" data-wact="refresh">⟳ Preise prüfen</button>
+      ${r.items.length ? `<button class="btn small primary" data-wact="proxies">🖨 Proxies drucken (PDF)</button>` : ""}
     </div>
     <form class="wish-add" id="wish-add" autocomplete="off">
       <input id="wish-name" list="wish-ac" placeholder="Karte (Name) …" required>
@@ -41,8 +42,9 @@ function renderWishlist(r) {
     <p class="muted small">Preise werden täglich geprüft (günstigster Druck, Cardmarket-Trend). Sobald eine Karte den Zielpreis
       erreicht, wird sie markiert und die Handy-App meldet sich. Scannst du eine gewünschte Karte ein, wird der Wunsch automatisch erfüllt.</p>
     ${r.items.length ? `<table class="list wish-table"><thead><tr>
-      <th></th><th>Karte</th><th>Anzahl</th><th>Zielpreis</th><th>Aktuell</th><th>Status</th><th></th></tr></thead><tbody>
+      <th><input type="checkbox" id="wish-all" title="Alle auswählen"></th><th></th><th>Karte</th><th>Anzahl</th><th>Zielpreis</th><th>Aktuell</th><th>Status</th><th></th></tr></thead><tbody>
       ${r.items.map((w) => `<tr data-wid="${w.id}" class="${w.target_reached ? "reached" : ""}">
+        <td><input type="checkbox" class="wish-sel" title="Für Proxies auswählen"></td>
         <td>${w.image_url ? `<img class="thumb" src="${esc(w.image_url)}" alt="" data-img="${esc(w.image_url)}">` : ""}</td>
         <td><b>${esc(w.name)}</b>${w.foil ? " ✦" : ""}
           <div class="muted small">${w.any_print ? "beliebiger Druck" : esc(w.set_code + " #" + w.collector_number)}${w.notes ? " · " + esc(w.notes) : ""}${w.owned ? ` · ${w.owned} bereits in der Sammlung` : ""}</div></td>
@@ -94,6 +96,18 @@ function bindWishlist() {
     const op = e.target.closest("[data-wop]");
     if (op) return wishOp(op.closest("[data-wid]").dataset.wid, op.dataset.wop);
     const a = e.target.closest("[data-wact]");
+    if (a && a.dataset.wact === "proxies") {
+      const ids = $$(".wish-sel:checked").map((c) => +c.closest("[data-wid]").dataset.wid);
+      const sel = ids.length ? wish.items.filter((w) => ids.includes(w.id)) : wish.items;
+      const n = sel.reduce((s, w) => s + w.quantity, 0);
+      openProxyDialog({ title: "Proxies aus der Wunschliste", url: "/api/wishlist/proxies.pdf", ids,
+        info: `${ids.length ? "Ausgewählt" : "Alle"}: ${sel.length} Karten, ${n} Exemplare (≈ ${Math.ceil(n / 9)} ${Math.ceil(n / 9) === 1 ? "Seite" : "Seiten"})` });
+      return;
+    }
+    if (e.target.id === "wish-all") {
+      $$(".wish-sel").forEach((c) => { c.checked = e.target.checked; });
+      return;
+    }
     if (a && a.dataset.wact === "refresh") {
       a.disabled = true;
       a.textContent = "Prüfe Preise …";
