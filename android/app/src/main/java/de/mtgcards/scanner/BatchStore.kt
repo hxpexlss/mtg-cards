@@ -15,6 +15,7 @@ data class BatchItem(
     val priceEur: Double?,
     val priceEurFoil: Double?,
     val imageUrl: String?,
+    val lang: String? = null,
 ) {
     val unitPrice get() = if (foil) priceEurFoil ?: priceEur else priceEur ?: priceEurFoil
     val key get() = "${scryfallId ?: name.lowercase()}|$foil"
@@ -29,6 +30,7 @@ data class BatchItem(
         put("price_eur", priceEur ?: JSONObject.NULL)
         put("price_eur_foil", priceEurFoil ?: JSONObject.NULL)
         put("image_url", imageUrl ?: "")
+        put("lang", lang ?: "")
     }
 
     /** Für POST /api/cards/batch */
@@ -37,6 +39,7 @@ data class BatchItem(
             put("name", name)
             if (!setCode.isNullOrBlank()) put("set", setCode)
             if (!cn.isNullOrBlank()) put("cn", cn)
+            if (!lang.isNullOrBlank()) put("lang", lang)
         }
         put("quantity", quantity)
         put("foil", foil)
@@ -51,6 +54,7 @@ data class BatchItem(
             o.optString("set").ifBlank { null }, o.optString("cn").ifBlank { null },
             o.optInt("quantity", 1), o.optBoolean("foil"), price(o, "price_eur"), price(o, "price_eur_foil"),
             o.optString("image_url").ifBlank { null },
+            o.optString("lang").ifBlank { null },
         )
 
         /** Aus einer Scryfall-Karte vom Server (/api/lookup). */

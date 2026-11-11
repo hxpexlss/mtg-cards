@@ -18,6 +18,8 @@ data class ScanResult(
     val collectorNumber: String?,
     /** Weitere Namenskandidaten (z.B. bei Showcase-/randlosen Karten), werden vom Server nacheinander probiert. */
     val alternatives: List<String> = emptyList(),
+    /** Sprachcode vom Kartenrand (z.B. "DMU • DE" -> "de"), falls lesbar. */
+    val lang: String? = null,
 )
 
 /**
@@ -61,10 +63,20 @@ object CardTextParser {
         val cn = CN_SLASH.find(bottom)?.groupValues?.get(1)
             ?: CN_RARITY_BEFORE.find(bottom)?.groupValues?.get(1)
             ?: CN_RARITY_AFTER.find(bottom)?.groupValues?.get(1)
-        val set = SET_LANG.find(bottom.uppercase())?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
+        val setMatch = SET_LANG.find(bottom.uppercase())
+        val set = setMatch?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
+        val lang = setMatch?.groupValues?.get(2)?.let { code ->
+            when (code) {
+                "JP" -> "ja"
+                "CS" -> "zhs"
+                "CT" -> "zht"
+                "PH" -> null
+                else -> code.lowercase()
+            }
+        }
 
         val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
-        return ScanResult(primary, set, cn, alternatives.filter { it != primary })
+        return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang)
     }
 
     /** Entfernt Mana-Symbole/OCR-Müll: behält nur Wörter, die überwiegend aus Buchstaben bestehen. */

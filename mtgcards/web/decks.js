@@ -14,11 +14,13 @@ function showTab(tab) {
   $("#decks-view").classList.toggle("hidden", tab !== "decks");
   $("#stats-view").classList.toggle("hidden", tab !== "stats");
   $("#wish-view").classList.toggle("hidden", tab !== "wishlist");
+  $("#sets-view").classList.toggle("hidden", tab !== "sets");
   $(".searchbox").style.visibility = tab === "collection" ? "" : "hidden";
   store("mtg-tab", tab);
   if (tab === "decks") loadDecks();
   if (tab === "stats" && typeof loadStats === "function") loadStats();
   if (tab === "wishlist" && typeof loadWishlist === "function") loadWishlist();
+  if (tab === "sets" && typeof loadSets === "function") loadSets();
 }
 
 function decksVisible() { return !$("#decks-view").classList.contains("hidden"); }
@@ -326,7 +328,7 @@ function bindDecks() {
     pv.style.left = Math.min(e.clientX + 24, innerWidth - 260) + "px";
     pv.style.top = Math.max(10, Math.min(e.clientY - 120, innerHeight - 350)) + "px";
   });
-  if (["decks", "stats", "wishlist"].includes(store("mtg-tab"))) setTimeout(() => showTab(store("mtg-tab")), 0);
+  if (["decks", "stats", "wishlist", "sets"].includes(store("mtg-tab"))) setTimeout(() => showTab(store("mtg-tab")), 0);
 }
 
 function onRevisionChange() {

@@ -8,7 +8,7 @@ const AUTO_TAGS = ["Commander", "Partner", "Companion"];
 const state = {
   token: "",
   q: "", ci: new Set(), ciMode: "within", tag: "", type: "", rarity: "", sort: "name", foilOnly: false,
-  view: "grid", revision: -1, isDesktop: false, cards: [],
+  view: "grid", revision: -1, isDesktop: false, cards: [], dupMin: 0,
 };
 
 // ---------------------------------------------------------------- Hilfen
@@ -93,6 +93,7 @@ function queryString() {
   if (state.type) p.set("type", state.type);
   if (state.rarity) p.set("rarity", state.rarity);
   if (state.foilOnly) p.set("foil", "1");
+  if (state.dupMin > 1) p.set("dup_min", String(state.dupMin));
   p.set("sort", state.sort);
   p.set("limit", "2000");
   return p.toString();
@@ -114,7 +115,12 @@ function renderCards(data) {
   const box = $("#results");
   const total = data.cards.reduce((s, c) => s + c.quantity, 0);
   $("#result-count").textContent = `${data.total} Einträge · ${total} Karten`;
-  const filtered = state.q || state.ci.size || state.tag || state.type || state.rarity || state.foilOnly;
+  if (data.duplicates) {
+    const d = data.duplicates;
+    $("#result-count").textContent += ` · ${d.cards} Karten ab ${d.min}× · ${d.extra_copies} überzählige Exemplare`
+      + ` (Wert ca. ${d.extra_value_eur.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}, wertvollstes Exemplar jeweils behalten)`;
+  }
+  const filtered = state.q || state.ci.size || state.tag || state.type || state.rarity || state.foilOnly || state.dupMin;
   $("#empty").classList.toggle("hidden", data.total > 0 || filtered);
   if (state.view === "grid") {
     box.className = "grid";
@@ -313,7 +319,8 @@ async function previewLookup() {
   const pv = $("#add-preview");
   pv.innerHTML = `<div class="placeholder">Suche …</div>`;
   try {
-    const qs = id ? "id=" + encodeURIComponent(id) : "name=" + encodeURIComponent(name);
+    const lang = $("#add-lang").value;
+    const qs = id ? "id=" + encodeURIComponent(id) : "name=" + encodeURIComponent(name) + (lang ? "&lang=" + lang : "");
     const c = await api("/api/lookup?" + qs);
     if (seq !== add.lookupSeq) return;
     add.preview = c;
@@ -343,7 +350,8 @@ async function submitAdd(ev) {
     const tags = $("#add-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
     const c = await api("/api/cards", {
       method: "POST",
-      json: { name, scryfall_id: id || undefined, quantity: +$("#add-qty").value || 1, foil: $("#add-foil").checked, tags },
+      json: { name, scryfall_id: id || (add.preview && $("#add-lang").value ? add.preview.scryfall_id : undefined),
+        lang: $("#add-lang").value || undefined, quantity: +$("#add-qty").value || 1, foil: $("#add-foil").checked, tags },
     });
     toast(`${c.name} hinzugefügt (jetzt ${c.quantity}×)`, "ok");
     for (const w of c.wish_fulfilled || []) toast(`★ Wunsch erfüllt: ${w.name}${w.remaining ? ` (noch ${w.remaining} gewünscht)` : ""}`, "ok");
@@ -561,6 +569,11 @@ function bind() {
   $("#f-rarity").onchange = (e) => { state.rarity = e.target.value; loadCards(); };
   $("#f-sort").onchange = (e) => { state.sort = e.target.value; loadCards(); };
   $("#f-foil").onchange = (e) => { state.foilOnly = e.target.checked; loadCards(); };
+  $("#f-dup").onchange = (e) => {
+    state.dupMin = +e.target.value;
+    if (state.dupMin && state.sort === "name") { /* Doppelte nach Name gruppiert lassen */ }
+    loadCards();
+  };
   $("#taglist").onclick = (e) => {
     const t = e.target.closest("[data-tag]");
     if (!t) return;
@@ -568,7 +581,8 @@ function bind() {
     loadCards();
   };
   $("#btn-reset").onclick = () => {
-    Object.assign(state, { q: "", tag: "", type: "", rarity: "", foilOnly: false });
+    Object.assign(state, { q: "", tag: "", type: "", rarity: "", foilOnly: false, dupMin: 0 });
+    $("#f-dup").value = "0";
     state.ci.clear();
     $("#q").value = ""; $("#f-type").value = ""; $("#f-rarity").value = ""; $("#f-foil").checked = false;
     $$("#ci-pips .pip").forEach((b) => b.classList.remove("active"));
@@ -631,6 +645,7 @@ function bind() {
     if (li) { e.preventDefault(); chooseName(add.suggestions[+li.dataset.i]); }
   });
   $("#add-print").onchange = previewLookup;
+  $("#add-lang").onchange = () => { $("#add-print").value = ""; previewLookup(); };
   $("#add-form").addEventListener("submit", submitAdd);
 
   $("#login-form").addEventListener("submit", () => {

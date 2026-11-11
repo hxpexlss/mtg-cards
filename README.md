@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.5.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.6.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.5.0_all.deb
+sudo apt install ./mtg-cards-server_1.6.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -94,7 +94,10 @@ damit der richtige Druck gespeichert wird. Funktioniert auch mit deutschen (und 
   Sonderrahmen), probiert der Server automatisch die weiteren erkannten Zeilen
 - **Querformat-Rahmen** (Drehen-Symbol) für quer gedruckte Karten wie Schlachten
 - Bildschirm antippen = scharfstellen, zwei Finger = zoomen, Blitz-Symbol = Taschenlampe
-- „Name manuell eingeben“, falls die Erkennung nicht klappt
+- „Name eingeben“, falls die Erkennung nicht klappt
+- **Kartensprache** (Knopf neben dem Drehen-Symbol): Automatisch liest den Sprachcode am Kartenrand
+  (z.B. `DMU • DE`), oder fest Deutsch, Englisch, Französisch, Japanisch … – gespeichert wird dann der Druck in
+  dieser Sprache (falls es ihn gibt). Auch am PC im Dialog „Karte hinzufügen“ wählbar.
 
 ## Import / Export
 
@@ -171,6 +174,23 @@ Tab **Wunschliste** (PC) bzw. **Wünsche** (App):
   entfernt).
 - Im Deck: **Fehlende → Wunschliste** setzt alle fehlenden Karten mit aktuellem Bestpreis auf die Liste.
 - Die Wunschliste ist im JSON-Export enthalten.
+
+## Editionen & Sammelfortschritt
+
+Tab **Sets** (PC) bzw. **Suche → Editionen & Sammelfortschritt** (App):
+
+- Alle Editionen deiner Sammlung mit Fortschritt im **Grundset** (z.B. 187/281 = 67 %), sortierbar nach
+  Fortschritt, Erscheinungsdatum, Name oder Anzahl. Jede andere Edition lässt sich per Code öffnen (z.B. `MH3`).
+- Set-Ansicht: alle Karten der Edition – vorhandene farbig, fehlende ausgegraut; umschaltbar **Grundset /
+  inkl. Varianten** (Showcase, randlos, Extended Art …), Filter nach **Seltenheit** und **Fehlende/Vorhandene**.
+- **Wert der fehlenden Karten** und **Fehlende → Wunschliste** (genau dieser Druck).
+- Gezählt wird pro Sammlernummer (Sprache und Foil egal).
+
+## Doppelte Karten
+
+In der Sammlung (PC: Seitenleiste „Doppelte“, App: Chip „Doppelte (ab 2)“): zeigt alle Karten, die du **ab 2**
+(oder 3/4/5) Mal besitzt – über alle Drucke, Editionen, Sprachen und Foil zusammengezählt. Dazu eine Zusammenfassung:
+Anzahl überzähliger Exemplare und deren Wert (das wertvollste Exemplar jeder Karte wird dabei behalten).
 
 ## Proxies drucken
 

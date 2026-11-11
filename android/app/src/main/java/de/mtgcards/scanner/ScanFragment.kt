@@ -133,6 +133,21 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             camera?.cameraControl?.enableTorch(torchOn)
         }
         view.findViewById<Button>(R.id.btnManual).setOnClickListener { manualEntry() }
+        val langButton = view.findViewById<Button>(R.id.btnLang)
+        langButton.text = Languages.short(Prefs.scanLang(requireContext()))
+        langButton.setOnClickListener {
+            val items = Languages.all
+            val current = items.indexOfFirst { it.first == Prefs.scanLang(requireContext()) }.coerceAtLeast(0)
+            AlertDialog.Builder(requireContext())
+                .setTitle("Sprache der Karten")
+                .setSingleChoiceItems(items.map { it.second }.toTypedArray(), current) { d, which ->
+                    Prefs.setScanLang(requireContext(), items[which].first)
+                    langButton.text = Languages.short(items[which].first)
+                    status.text = "Kartensprache: ${items[which].second}"
+                    d.dismiss()
+                }
+                .show()
+        }
         overlay.landscape = Prefs.landscape(requireContext())
         view.findViewById<ImageButton>(R.id.btnRotate).setOnClickListener {
             overlay.landscape = !overlay.landscape
@@ -298,6 +313,12 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     }
 
     // ------------------------------------------------------------------ Nachschlagen / Hinzufügen
+    /** Gewählte Sprache; bei "Automatisch" die vom Kartenrand gelesene (sonst Englisch/Standard). */
+    private fun langFor(scan: ScanResult): String? {
+        val pref = Prefs.scanLang(requireContext())
+        return if (pref == "auto") scan.lang else pref
+    }
+
     private fun lookup(scan: ScanResult) {
         val name = scan.name ?: return
         paused = true
@@ -305,7 +326,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         status.text = "Suche „$name“ …"
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives)
+                val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives, langFor(scan))
                 when {
                     batchSwitch.isChecked -> {
                         addToBatch(BatchItem.fromCard(card, foilCheck.isChecked))
@@ -323,11 +344,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
                     // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
                     addToBatch(BatchItem(null, name, scan.setCode, scan.collectorNumber, 1, foilCheck.isChecked,
-                        null, null, null))
+                        null, null, null, langFor(scan)))
                     status.text = "Offline – „$name“ im Stapel (wird beim Speichern geprüft)"
                     delay(900L)
                 } else if (e.code == Api.UNREACHABLE) {
-                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1))
+                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan)))
                     delay(900L)
                 } else {
                     feedback.error(overlay, sound)
@@ -432,7 +453,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                     continue
                 }
                 try {
-                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil)
+                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang)
                     sent += p.quantity
                     ScanSession.added += p.quantity
                     ScanSession.recent.removeAll { it.pending && it.name == p.name }

@@ -279,6 +279,23 @@ dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(3px); }
 .badge-n { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--ok);
   color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
 
+/* Sets */
+#sets-view .content { max-width: 1300px; margin: 0 auto; }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.set-item { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; cursor: pointer; }
+.set-item:hover { border-color: var(--accent); }
+.set-top { display: flex; gap: 10px; align-items: center; }
+.set-top > div { flex: 1; min-width: 0; }
+.set-top .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-top .pct { font-size: 18px; }
+.set-icon { width: 28px; height: 28px; filter: invert(var(--icon-invert, 0)); }
+.set-icon.big { width: 34px; height: 34px; }
+.progress.big { height: 8px; margin-bottom: 14px; }
+.set-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.card.missing img, .card.missing .noimg { filter: grayscale(1); opacity: .35; }
+.card.missing { border-style: dashed; }
+@media (prefers-color-scheme: dark) { :root { --icon-invert: 1; } }
+
 /* Tabs */
 .tabs { display: flex; gap: 4px; }
 .tabs button { background: none; border: 0; color: var(--muted); font: inherit; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; }

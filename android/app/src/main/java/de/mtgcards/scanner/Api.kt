@@ -92,8 +92,9 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     }
 
     suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null,
-                       alternatives: List<String> = emptyList()): JSONObject {
+                       alternatives: List<String> = emptyList(), lang: String? = null): JSONObject {
         val q = buildList {
+            if (!lang.isNullOrBlank()) add("lang=${enc(lang)}")
             if (!name.isNullOrBlank()) add("name=${enc(name)}")
             alternatives.forEach { add("alt=${enc(it)}") }
             if (!setCode.isNullOrBlank()) add("set=${enc(setCode)}")
@@ -110,17 +111,20 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         })
 
     /** Hinzufügen per Name (+ optional Set/Nummer) – der Server schlägt bei Scryfall nach. */
-    suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean): JSONObject =
+    suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean,
+                          lang: String? = null): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("name", name)
+            if (!lang.isNullOrBlank()) put("lang", lang)
             if (!setCode.isNullOrBlank()) put("set", setCode)
             if (!cn.isNullOrBlank()) put("cn", cn)
             put("quantity", quantity)
             put("foil", foil)
         })
 
-    suspend fun search(q: String, ci: String, tag: String, sort: String = "name"): JSONObject {
+    suspend fun search(q: String, ci: String, tag: String, sort: String = "name", dupMin: Int = 0): JSONObject {
         val params = buildList {
+            if (dupMin > 1) add("dup_min=$dupMin")
             if (q.isNotBlank()) add("q=${enc(q)}")
             if (ci.isNotBlank()) add("ci=${enc(ci)}")
             if (tag.isNotBlank()) add("tag=${enc(tag)}")
@@ -133,6 +137,10 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     suspend fun card(id: Long) = json("GET", "/api/cards/$id")
 
     suspend fun decks() = json("GET", "/api/decks")
+
+    suspend fun sets() = json("GET", "/api/sets")
+
+    suspend fun set(code: String) = json("GET", "/api/sets/${enc(code)}")
 
     /** Binärdaten laden (z.B. Proxy-PDF). */
     suspend fun download(path: String): ByteArray = withContext(Dispatchers.IO) {

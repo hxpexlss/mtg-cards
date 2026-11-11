@@ -37,6 +37,7 @@ class CardTextParserTest {
         assertEquals("Krenko Boss der Blechstraße", r.name)
         assertEquals("123", r.collectorNumber)
         assertEquals("DMU", r.setCode)
+        assertEquals("de", r.lang)
     }
 
     @Test

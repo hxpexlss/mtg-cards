@@ -72,6 +72,13 @@ class TestWishlistApi(unittest.TestCase):
         st, r = self.call("/api/wishlist/refresh", "POST", {})
         self.assertEqual(r["total"], 1)
 
+    def test_b_bulk_specific_prints(self):
+        st, r = self.call("/api/wishlist/bulk", "POST", {"scryfall_ids": ["kraum-id", "gibtsnicht"]})
+        self.assertEqual(r["added"], ["Kraum, Ludevic's Opus"])
+        item = next(i for i in self.call("/api/wishlist")[1]["items"] if i["name"].startswith("Kraum"))
+        self.assertFalse(item["any_print"])
+        self.call(f"/api/wishlist/{item['id']}", "DELETE")
+
     def test_z_export_contains_wishlist(self):
         db = self.srv.db
         self.call("/api/wishlist", "POST", {"name": "Kraum", "max_price_eur": 1})

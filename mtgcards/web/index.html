@@ -13,6 +13,7 @@
   <nav class="tabs">
     <button data-tab="collection" class="active">Sammlung</button>
     <button data-tab="decks">Decks</button>
+    <button data-tab="sets">Sets</button>
     <button data-tab="wishlist">Wunschliste</button>
     <button data-tab="stats">Statistik</button>
   </nav>
@@ -70,6 +71,12 @@
         <option value="quantity">Anzahl</option><option value="price">Preis</option>
       </select>
       <label class="check"><input type="checkbox" id="f-foil"> nur Foils</label>
+      <h3>Doppelte</h3>
+      <select id="f-dup">
+        <option value="0">alle Karten</option><option value="2">ab 2 Exemplaren</option>
+        <option value="3">ab 3 Exemplaren</option><option value="4">ab 4 Exemplaren</option>
+        <option value="5">ab 5 Exemplaren</option>
+      </select>
     </section>
     <section class="stats" id="stats"></section>
     <button class="btn small ghost" id="btn-reset">Filter zurücksetzen</button>
@@ -101,6 +108,10 @@
       <p>Lege ein Deck an und füge eine Deckliste ein (z.B. Export aus Moxfield, Archidekt oder MTG Arena).
       Du siehst dann sofort, welche Karten du schon besitzt und welche fehlen.</p></div>
   </main>
+</div>
+
+<div class="layout hidden" id="sets-view">
+  <main class="content" id="sets-main"></main>
 </div>
 
 <div class="layout hidden" id="wish-view">
@@ -139,6 +150,12 @@
         </label>
         <label>Druck / Edition
           <select id="add-print"><option value="">automatisch (neuester Druck)</option></select>
+        </label>
+        <label>Sprache des Drucks
+          <select id="add-lang"><option value="">automatisch / Englisch</option><option value="de">Deutsch</option>
+            <option value="fr">Französisch</option><option value="it">Italienisch</option><option value="es">Spanisch</option>
+            <option value="pt">Portugiesisch</option><option value="ja">Japanisch</option><option value="ko">Koreanisch</option>
+            <option value="ru">Russisch</option><option value="zhs">Chinesisch (vereinfacht)</option><option value="zht">Chinesisch (traditionell)</option></select>
         </label>
         <div class="row">
           <label>Anzahl <input id="add-qty" type="number" min="1" value="1"></label>
@@ -221,5 +238,6 @@
 <script src="stats.js"></script>
 <script src="wishlist.js"></script>
 <script src="proxies.js"></script>
+<script src="sets.js"></script>
 </body>
 </html>

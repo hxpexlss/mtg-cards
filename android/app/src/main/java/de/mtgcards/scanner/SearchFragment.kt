@@ -28,6 +28,7 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
     private lateinit var adapter: CardAdapter
     private val colors = linkedSetOf<String>()
     private var tag = ""
+    private var dupMin = 0
     private var job: Job? = null
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -58,12 +59,33 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
                 text = t
                 isCheckable = true
                 setOnCheckedChangeListener { _, checked ->
-                    if (checked) tag = t else if (tag == t) tag = ""
+                    if (checked) {
+                        tag = t
+                        for (i in 0 until tagGroup.childCount) {
+                            val other = tagGroup.getChildAt(i) as Chip
+                            if (other !== this && other.text.toString() in listOf("Commander", "Partner", "Companion")) {
+                                other.isChecked = false
+                            }
+                        }
+                    } else if (tag == t) {
+                        tag = ""
+                    }
                     search()
                 }
             })
         }
-        tagGroup.isSingleSelection = true
+        tagGroup.isSingleSelection = false
+        tagGroup.addView(Chip(requireContext()).apply {
+            text = "Doppelte (ab 2)"
+            isCheckable = true
+            setOnCheckedChangeListener { _, checked ->
+                dupMin = if (checked) 2 else 0
+                search()
+            }
+        })
+        view.findViewById<android.widget.Button>(R.id.btnSets).setOnClickListener {
+            startActivity(Intent(requireContext(), SetsActivity::class.java))
+        }
 
         input.doAfterTextChanged { search(300) }
     }
@@ -78,13 +100,18 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
         job = viewLifecycleOwner.lifecycleScope.launch {
             if (delayMs > 0) delay(delayMs)
             try {
-                val res = Api.fromPrefs(requireContext()).search(input.text.toString(), colors.joinToString(""), tag)
+                val res = Api.fromPrefs(requireContext()).search(input.text.toString(), colors.joinToString(""), tag,
+                    dupMin = dupMin)
                 val arr = res.getJSONArray("cards")
                 val items = (0 until arr.length()).map { arr.getJSONObject(it) }
                 adapter.submit(items)
                 val total = items.sumOf { it.optInt("quantity") }
                 count.text = "${res.optInt("total")} Einträge · $total Karten" +
-                    if (colors.isNotEmpty()) " · passt in ${colors.joinToString("")}" else ""
+                    (if (colors.isNotEmpty()) " · passt in ${colors.joinToString("")}" else "") +
+                    (res.optJSONObject("duplicates")?.let { d ->
+                        "\n${d.optInt("cards")} Karten doppelt · ${d.optInt("extra_copies")} überzählig · " +
+                            "Wert ca. ${euro(d.optDouble("extra_value_eur"))}"
+                    } ?: "")
             } catch (e: ApiException) {
                 count.text = e.message
             }

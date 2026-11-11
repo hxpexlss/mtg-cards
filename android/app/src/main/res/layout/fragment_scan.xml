@@ -44,6 +44,20 @@
             android:text="Auto"
             android:textColor="#FFFFFF" />
 
+        <Button
+            android:id="@+id/btnLang"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="4dp"
+            android:background="@drawable/bg_status"
+            android:contentDescription="Kartensprache"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <ImageButton
             android:id="@+id/btnRotate"
             android:layout_width="44dp"

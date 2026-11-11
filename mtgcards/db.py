@@ -296,8 +296,14 @@ class Database:
 
     # -- Suche ------------------------------------------------------------
     def search(self, q="", ci="", ci_mode="within", tag="", type_="", rarity="", set_code="",
-               foil=None, sort="name", limit=500, offset=0):
+               foil=None, sort="name", limit=500, offset=0, dup_min=0):
         where, vals = [], []
+        dup_min = int(dup_min or 0)
+        if dup_min > 1:
+            # Doppelte: alle Drucke einer Karte (normal + Foil, alle Editionen/Sprachen) zusammengezählt
+            where.append("COALESCE(oracle_id, name) IN (SELECT COALESCE(oracle_id, name) FROM cards "
+                         "GROUP BY COALESCE(oracle_id, name) HAVING SUM(quantity) >= ?)")
+            vals.append(dup_min)
         for term in (q or "").split():
             like = f"%{term}%"
             where.append("(name LIKE ? OR printed_name LIKE ? OR type_line LIKE ? OR oracle_text LIKE ?"
@@ -344,6 +350,44 @@ class Database:
         limit = max(1, min(int(limit or 500), 5000))
         offset = max(0, int(offset or 0))
         return rows[offset:offset + limit], total
+
+    def duplicate_summary(self, dup_min=2):
+        """Zusammenfassung doppelter Karten: Anzahl Karten, überzählige Exemplare, deren Wert."""
+        dup_min = max(2, int(dup_min or 2))
+        groups = {}
+        for c in self.all():
+            g = groups.setdefault(c["oracle_id"] or c["name"], {"qty": 0, "prices": []})
+            g["qty"] += c["quantity"]
+            g["prices"] += [self.card_price(c)] * c["quantity"]
+        dups = [g for g in groups.values() if g["qty"] >= dup_min]
+        extra = 0
+        extra_value = 0.0
+        for g in dups:
+            # behalten: 1 Exemplar (das wertvollste), Rest = überzählig
+            prices = sorted(g["prices"], reverse=True)
+            extra += g["qty"] - 1
+            extra_value += sum(prices[1:])
+        return {"min": dup_min, "cards": len(dups), "copies": sum(g["qty"] for g in dups),
+                "extra_copies": extra, "extra_value_eur": round(extra_value, 2)}
+
+    def set_ownership(self, set_code):
+        """Besitz pro Sammlernummer einer Edition: {cn: {"quantity", "foil", "ids"}}"""
+        out = {}
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, collector_number, quantity, foil FROM cards WHERE set_code=?", (set_code.upper(),))
+            for cid, cn, qty, foil in rows:
+                o = out.setdefault(cn, {"quantity": 0, "foil": 0, "ids": []})
+                o["quantity"] += qty
+                o["foil"] += qty if foil else 0
+                o["ids"].append(cid)
+        return out
+
+    def owned_sets(self):
+        with self._lock:
+            return [dict(zip(("set_code", "set_name", "prints", "cards"), r)) for r in self.conn.execute(
+                "SELECT set_code, MAX(set_name), COUNT(DISTINCT collector_number), SUM(quantity) FROM cards "
+                "WHERE set_code IS NOT NULL AND set_code != '' GROUP BY set_code")]
 
     def all(self):
         with self._lock:

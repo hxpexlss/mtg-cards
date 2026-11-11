@@ -27,6 +27,11 @@ object Prefs {
         e.apply()
     }
 
+    fun scanLang(ctx: Context): String = sp(ctx).getString("scan_lang", "auto") ?: "auto"
+    fun setScanLang(ctx: Context, value: String) {
+        sp(ctx).edit().putString("scan_lang", value).apply()
+    }
+
     fun landscape(ctx: Context): Boolean = sp(ctx).getBoolean("landscape", false)
     fun setLandscape(ctx: Context, value: Boolean) {
         sp(ctx).edit().putBoolean("landscape", value).apply()

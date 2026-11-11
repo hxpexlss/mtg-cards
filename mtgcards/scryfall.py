@@ -223,7 +223,7 @@ class Scryfall:
             raise ScryfallError(f"Scryfall nicht erreichbar: {e}", 503) from None
 
     def _get(self, path, params=None, cache=True):
-        url = self.base + path
+        url = path if path.startswith("http") else self.base + path
         if params:
             url += "?" + urlencode({k: v for k, v in params.items() if v not in (None, "")})
         now = time.time()
@@ -284,6 +284,49 @@ class Scryfall:
     def search(self, q, unique="cards", order="name", page=1):
         return self._get("/cards/search", {"q": q, "unique": unique, "order": order, "page": page})
 
+    # -- Editionen ----------------------------------------------------------
+    def sets(self):
+        """Alle Editionen (Code, Name, Kartenanzahl, Symbol, Erscheinungsdatum)."""
+        return self._get("/sets").get("data", [])
+
+    def set_info(self, code):
+        return self._get(f"/sets/{quote(code.lower())}")
+
+    def set_cards(self, code):
+        """Alle Karten einer Edition inkl. Varianten (Showcase, randlos …), seitenweise geladen."""
+        params = {"q": f"e:{code.lower()}", "unique": "prints", "order": "set",
+                  "include_extras": "true", "include_variations": "true"}
+        try:
+            page = self._get("/cards/search", params)
+        except ScryfallError as e:
+            if e.status == 404:
+                return []
+            raise
+        cards = list(page.get("data", []))
+        while page.get("has_more") and page.get("next_page"):
+            page = self._get(page["next_page"])
+            cards += page.get("data", [])
+        return cards
+
+    # -- Sprache -------------------------------------------------------------
+    def localize(self, raw, lang):
+        """Gleiche Karte in einer anderen Sprache (z.B. "de"). Fällt auf das Original zurück."""
+        lang = (lang or "").lower()
+        if not lang or lang in ("auto", "any") or raw.get("lang") == lang:
+            return raw
+        try:
+            return self.by_set_number(raw["set"], raw["collector_number"], lang)
+        except (ScryfallError, KeyError):
+            pass
+        safe = (raw.get("name") or "").split(" // ")[0].replace('"', "")
+        try:
+            data = self.search(f'!"{safe}" lang:{lang}', unique="prints", order="released")
+            if data.get("data"):
+                return data["data"][0]
+        except ScryfallError:
+            pass
+        return raw
+
     def autocomplete(self, q):
         if len(q.strip()) < 2:
             return []
@@ -316,7 +359,16 @@ class Scryfall:
 
     # -- High-Level-Lookup -----------------------------------------------
     def lookup_any(self, name=None, alternatives=(), **kw):
-        """Wie lookup(), probiert bei "nicht gefunden" aber weitere Namenskandidaten (vom Scanner)."""
+        """Wie lookup(), probiert bei "nicht gefunden" aber weitere Namenskandidaten (vom Scanner).
+
+        Mit lang (z.B. "de") wird der Druck in dieser Sprache gesucht.
+        """
+        lang = kw.get("lang")
+        if lang and lang.lower() not in ("auto", "any", "en") and not kw.get("scryfall_id"):
+            return self.localize(self._lookup_any(name, alternatives, **kw), lang)
+        return self._lookup_any(name, alternatives, **kw)
+
+    def _lookup_any(self, name=None, alternatives=(), **kw):
         try:
             return self.lookup(name=name, **kw)
         except ScryfallError as e:

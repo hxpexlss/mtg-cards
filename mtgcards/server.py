@@ -311,10 +311,14 @@ def r_list(h, qs):
         q=_first(qs, "q"), ci=_first(qs, "ci"), ci_mode=_first(qs, "ci_mode", "within"),
         tag=_first(qs, "tag"), type_=_first(qs, "type"), rarity=_first(qs, "rarity"),
         set_code=_first(qs, "set"), foil=None if foil == "" else foil in ("1", "true"),
+        dup_min=_first(qs, "dup_min", "0") or 0,
         sort=_first(qs, "sort", "name"), limit=_first(qs, "limit", "500"),
         offset=_first(qs, "offset", "0"),
     )
-    h.send_json({"total": total, "cards": cards, "revision": h.ctx.db.revision()})
+    res = {"total": total, "cards": cards, "revision": h.ctx.db.revision()}
+    if int(_first(qs, "dup_min", "0") or 0) > 1:
+        res["duplicates"] = h.ctx.db.duplicate_summary(int(_first(qs, "dup_min")))
+    h.send_json(res)
 
 
 def r_get(h, qs, cid):
@@ -341,6 +345,8 @@ def _lookup_from(h, data):
 
 def r_lookup(h, qs):
     data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id")}
+    if data["lang"] == "auto":
+        data["lang"] = ""
     data["alt"] = qs.get("alt", [])
     if not any(v for k, v in data.items() if k != "alt"):
         raise ApiError(400, "name oder id angeben")
@@ -649,6 +655,107 @@ def r_deck_to_wishlist(h, qs, did):
     h.send_json({"added": added})
 
 
+# -- Editionen / Sammelfortschritt ----------------------------------------------------
+
+_MAIN_RARITIES = ("common", "uncommon", "rare", "mythic")
+
+
+def _is_main(card, printed_size):
+    """Grundset = Sammlernummer innerhalb der gedruckten Setgröße (ohne Showcase/randlos/Extras)."""
+    digits = "".join(ch for ch in (card.get("collector_number") or "") if ch.isdigit())
+    return bool(printed_size) and digits == (card.get("collector_number") or "") and digits and \
+        int(digits) <= printed_size
+
+
+def _set_meta(h):
+    try:
+        return {s["code"].upper(): s for s in h.ctx.scryfall.sets()}
+    except ScryfallError:
+        return {}
+
+
+def r_sets(h, qs):
+    """Editionen der Sammlung mit Fortschritt (Grundset und inkl. Varianten)."""
+    meta = _set_meta(h)
+    out = []
+    for s in h.ctx.db.owned_sets():
+        m = meta.get(s["set_code"], {})
+        printed = m.get("printed_size") or m.get("card_count") or 0
+        total = m.get("card_count") or 0
+        own = h.ctx.db.set_ownership(s["set_code"])
+        main_owned = sum(1 for cn in own if cn.isdigit() and printed and int(cn) <= printed)
+        out.append({
+            "code": s["set_code"], "name": m.get("name") or s["set_name"], "icon": m.get("icon_svg_uri"),
+            "released": m.get("released_at"), "set_type": m.get("set_type"),
+            "owned_prints": s["prints"], "owned_cards": s["cards"],
+            "total": total, "main_size": printed, "main_owned": main_owned,
+            "percent": round(100 * main_owned / printed, 1) if printed else None,
+        })
+    out.sort(key=lambda x: (-(x["percent"] or 0), x["name"] or ""))
+    h.send_json({"sets": out})
+
+
+def r_set_detail(h, qs, code):
+    """Alle Karten einer Edition mit Besitz-Status (Kartenliste von Scryfall, zwischengespeichert)."""
+    code = code.upper()
+    raw = h.ctx.scryfall.set_cards(code)
+    if not raw:
+        raise ApiError(404, f"Edition {code} nicht gefunden")
+    try:
+        info = h.ctx.scryfall.set_info(code)
+    except ScryfallError:
+        info = {}
+    printed = info.get("printed_size") or info.get("card_count") or len(raw)
+    own = h.ctx.db.set_ownership(code)
+    cards, stats = [], {}
+    for r in raw:
+        c = normalize_card(r)
+        o = own.get(c["collector_number"], {})
+        main = _is_main(c, printed)
+        try:
+            price = float(c.get("price_eur") or c.get("price_eur_foil") or 0)
+        except ValueError:
+            price = 0.0
+        entry = {k: c.get(k) for k in ("scryfall_id", "name", "collector_number", "rarity", "image_url",
+                                       "mana_cost", "type_line", "color_identity", "price_eur")}
+        entry.update(owned=o.get("quantity", 0), owned_foil=o.get("foil", 0), main=main,
+                     price=round(price, 2), ids=o.get("ids", []))
+        cards.append(entry)
+        for scope in ("main", "all") if main else ("all",):
+            for rar in (c["rarity"], "_all"):
+                st = stats.setdefault(scope, {}).setdefault(rar, {"total": 0, "owned": 0, "missing_value": 0.0})
+                st["total"] += 1
+                if o.get("quantity"):
+                    st["owned"] += 1
+                else:
+                    st["missing_value"] += price
+    for scope in stats.values():
+        for st in scope.values():
+            st["missing_value"] = round(st["missing_value"], 2)
+            st["percent"] = round(100 * st["owned"] / st["total"], 1) if st["total"] else 0
+    h.send_json({"code": code, "name": info.get("name") or (cards[0]["name"] if cards else code),
+                 "icon": info.get("icon_svg_uri"), "released": info.get("released_at"),
+                 "main_size": printed, "stats": stats, "cards": cards})
+
+
+def r_wish_bulk(h, qs):
+    """Mehrere bestimmte Drucke auf die Wunschliste (z.B. fehlende Karten einer Edition)."""
+    data = h.read_json()
+    ids = [i for i in data.get("scryfall_ids") or [] if i]
+    if not ids:
+        raise ApiError(400, "Keine Karten angegeben")
+    fetched = h.ctx.scryfall.collection(ids)
+    added = []
+    for sid in ids:
+        raw = fetched.get(sid)
+        if not raw:
+            continue
+        card = normalize_card(raw)
+        h.ctx.wishlist.add(card, 1, None, any_print=False, notes=data.get("notes") or "")
+        added.append(card["name"])
+    h.send_json({"added": added})
+
+
 # -- Proxies (PDF) -----------------------------------------------------------------
 
 def _proxy_cache_dir(h):
@@ -699,6 +806,9 @@ def r_deck_proxies(h, qs, did):
 
 
 ROUTES = [
+    ("GET", r"/api/sets", r_sets),
+    ("GET", r"/api/sets/([A-Za-z0-9]{2,8})", r_set_detail),
+    ("POST", r"/api/wishlist/bulk", r_wish_bulk),
     ("GET", r"/api/wishlist/proxies\.pdf", r_wish_proxies),
     ("GET", r"/api/decks/(\d+)/proxies\.pdf", r_deck_proxies),
     ("GET", r"/api/wishlist", r_wish_list),
