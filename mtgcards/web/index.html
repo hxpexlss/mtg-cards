@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Cards</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="icon.svg" alt=""><span>MTG Cards</span></div>
+  <div class="searchbox">
+    <input id="q" type="search" placeholder="Sammlung durchsuchen – Name, Typ, Text, Tag …" autocomplete="off">
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="btn-add" title="Karte per Name hinzufügen (Strg+N)">＋ Karte</button>
+    <button class="btn" id="btn-io" title="Import / Export">⇅ Import/Export</button>
+    <button class="btn icon" id="btn-settings" title="Einstellungen & Verbindung">⚙</button>
+    <span class="conn" id="conn" title="Verbindung"></span>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <section>
+      <h3>Farbidentität</h3>
+      <div class="pips" id="ci-pips">
+        <button data-c="W" class="pip pip-W" title="Weiß">W</button>
+        <button data-c="U" class="pip pip-U" title="Blau">U</button>
+        <button data-c="B" class="pip pip-B" title="Schwarz">B</button>
+        <button data-c="R" class="pip pip-R" title="Rot">R</button>
+        <button data-c="G" class="pip pip-G" title="Grün">G</button>
+        <button data-c="C" class="pip pip-C" title="Farblos">C</button>
+      </div>
+      <select id="ci-mode">
+        <option value="within">passt in Deck mit diesen Farben</option>
+        <option value="exact">genau diese Farben</option>
+        <option value="includes">enthält diese Farben</option>
+      </select>
+    </section>
+    <section>
+      <h3>Tags</h3>
+      <div class="taglist" id="taglist"></div>
+    </section>
+    <section>
+      <h3>Typ</h3>
+      <select id="f-type">
+        <option value="">alle</option>
+        <option>Creature</option><option>Instant</option><option>Sorcery</option>
+        <option>Artifact</option><option>Enchantment</option><option>Planeswalker</option>
+        <option>Land</option><option>Battle</option><option>Legendary</option>
+      </select>
+      <h3>Seltenheit</h3>
+      <select id="f-rarity">
+        <option value="">alle</option><option value="common">Common</option>
+        <option value="uncommon">Uncommon</option><option value="rare">Rare</option>
+        <option value="mythic">Mythic</option><option value="special">Special</option>
+      </select>
+      <h3>Sortierung</h3>
+      <select id="f-sort">
+        <option value="name">Name</option><option value="added">Zuletzt hinzugefügt</option>
+        <option value="cmc">Manawert</option><option value="set">Edition</option>
+        <option value="quantity">Anzahl</option><option value="price">Preis</option>
+      </select>
+      <label class="check"><input type="checkbox" id="f-foil"> nur Foils</label>
+    </section>
+    <section class="stats" id="stats"></section>
+    <button class="btn small ghost" id="btn-reset">Filter zurücksetzen</button>
+  </aside>
+
+  <main class="content">
+    <div class="resultbar">
+      <span id="result-count"></span>
+      <div class="viewtoggle">
+        <button data-view="grid" class="active" title="Kartenansicht">▦</button>
+        <button data-view="list" title="Listenansicht">☰</button>
+      </div>
+    </div>
+    <div id="results" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <h2>Noch keine Karten</h2>
+      <p>Scanne Karten mit der Handy-App oder füge sie hier mit <b>＋ Karte</b> per Name hinzu.</p>
+    </div>
+  </main>
+</div>
+
+<!-- Karte hinzufügen -->
+<dialog id="dlg-add" class="modal">
+  <form method="dialog" class="modal-body" id="add-form" autocomplete="off">
+    <header><h2>Karte hinzufügen</h2><button class="x" value="cancel" formnovalidate>×</button></header>
+    <div class="add-grid">
+      <div>
+        <label>Kartenname (Englisch oder z.B. Deutsch)
+          <div class="ac-wrap">
+            <input id="add-name" required placeholder="z.B. Atraxa, Praetors' Voice">
+            <ul id="ac-list" class="ac-list hidden"></ul>
+          </div>
+        </label>
+        <label>Druck / Edition
+          <select id="add-print"><option value="">automatisch (neuester Druck)</option></select>
+        </label>
+        <div class="row">
+          <label>Anzahl <input id="add-qty" type="number" min="1" value="1"></label>
+          <label class="check"><input type="checkbox" id="add-foil"> Foil</label>
+        </div>
+        <label>Zusätzliche Tags (mit Komma trennen)
+          <input id="add-tags" placeholder="z.B. Deck: Atraxa, Tauschen">
+        </label>
+        <p class="muted small">Fähigkeiten, Farbidentität und die Tags <b>Commander</b>, <b>Partner</b>
+          und <b>Companion</b> werden automatisch von Scryfall übernommen.</p>
+      </div>
+      <div class="preview" id="add-preview"><div class="placeholder">Vorschau</div></div>
+    </div>
+    <footer>
+      <label class="check"><input type="checkbox" id="add-keep" checked> Dialog offen lassen</label>
+      <span class="spacer"></span>
+      <button class="btn" value="cancel" formnovalidate>Schließen</button>
+      <button class="btn primary" id="add-submit" value="default">Hinzufügen</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Kartendetails -->
+<dialog id="dlg-card" class="modal wide">
+  <div class="modal-body">
+    <header><h2 id="cd-title"></h2><button class="x" data-close>×</button></header>
+    <div class="card-detail" id="cd-body"></div>
+  </div>
+</dialog>
+
+<!-- Import / Export -->
+<dialog id="dlg-io" class="modal">
+  <div class="modal-body">
+    <header><h2>Import / Export</h2><button class="x" data-close>×</button></header>
+    <h3>Export</h3>
+    <p class="muted">Sichert die gesamte Sammlung inklusive Tags und Notizen.</p>
+    <div class="row">
+      <a class="btn" id="exp-json" download="mtg-cards-export.json">JSON exportieren</a>
+      <a class="btn" id="exp-csv" download="mtg-cards-export.csv">CSV exportieren</a>
+    </div>
+    <h3>Import</h3>
+    <p class="muted">JSON- oder CSV-Datei (eigener Export oder z.B. Moxfield/ManaBox/Deckbox-CSV mit
+      Spalten <code>Name</code>, <code>Set</code>, <code>Collector Number</code>, <code>Quantity</code>, <code>Foil</code>).
+      Fehlende Kartendaten werden über Scryfall ergänzt.</p>
+    <input type="file" id="imp-file" accept=".json,.csv,.txt,application/json,text/csv">
+    <div class="row">
+      <label class="check"><input type="radio" name="imp-mode" value="add" checked> zur Sammlung hinzufügen</label>
+      <label class="check"><input type="radio" name="imp-mode" value="replace"> Sammlung ersetzen</label>
+    </div>
+    <button class="btn primary" id="imp-go">Importieren</button>
+    <pre id="imp-result" class="result hidden"></pre>
+  </div>
+</dialog>
+
+<!-- Einstellungen -->
+<dialog id="dlg-settings" class="modal wide">
+  <div class="modal-body">
+    <header><h2>Einstellungen &amp; Verbindung</h2><button class="x" data-close>×</button></header>
+    <div id="settings-body"></div>
+  </div>
+</dialog>
+
+<!-- Token-Abfrage -->
+<dialog id="dlg-login" class="modal">
+  <form method="dialog" class="modal-body" id="login-form">
+    <header><h2>Zugangs-Token</h2></header>
+    <p>Dieser Server ist mit einem Token geschützt. Auf dem Server anzeigen mit
+      <code>mtg-cards-server --show-token</code> bzw. <code>mtg-cards --show-token</code>.</p>
+    <input id="login-token" placeholder="XXXX-XXXX-XXXX-XXXX" required>
+    <footer><span class="spacer"></span><button class="btn primary">Verbinden</button></footer>
+  </form>
+</dialog>
+
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

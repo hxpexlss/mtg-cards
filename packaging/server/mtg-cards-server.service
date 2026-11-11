@@ -1,0 +1,25 @@
+[Unit]
+Description=MTG Cards Headless-Server (Magic-Kartensammlung)
+Documentation=https://github.com/hxpexlss/mtg-cards
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mtgcards
+Group=mtgcards
+ExecStart=/usr/bin/mtg-cards-server --config /etc/mtg-cards/server.json
+Restart=on-failure
+RestartSec=3
+StateDirectory=mtg-cards
+StateDirectoryMode=0750
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/mtg-cards
+ReadOnlyPaths=/etc/mtg-cards
+
+[Install]
+WantedBy=multi-user.target

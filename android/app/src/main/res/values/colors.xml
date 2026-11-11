@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">#8B6CFF</color>
+    <color name="accent_dark">#5B3FD6</color>
+    <color name="gold">#E2A03F</color>
+    <color name="panel">#F2F0FA</color>
+    <color name="launcher_bg">#1D1A2E</color>
+</resources>

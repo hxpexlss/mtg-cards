@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/mtg-cards
+    echo "Hinweis: Die Datenbank unter /var/lib/mtg-cards wurde NICHT gelöscht."
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+exit 0

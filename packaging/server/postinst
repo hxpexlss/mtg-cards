@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+CONF=/etc/mtg-cards/server.json
+
+if [ "$1" = "configure" ]; then
+    if ! getent passwd mtgcards >/dev/null; then
+        useradd --system --user-group --home-dir /var/lib/mtg-cards --no-create-home \
+            --shell /usr/sbin/nologin --comment "MTG Cards Server" mtgcards
+    fi
+    install -d -o mtgcards -g mtgcards -m 0750 /var/lib/mtg-cards
+    install -d -o root -g mtgcards -m 0750 /etc/mtg-cards
+    if [ ! -f "$CONF" ]; then
+        /usr/bin/mtg-cards-server --config "$CONF" --show-token >/dev/null
+    fi
+    chown root:mtgcards "$CONF"
+    chmod 0640 "$CONF"
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable mtg-cards-server.service >/dev/null 2>&1 || true
+        systemctl restart mtg-cards-server.service || true
+    fi
+
+    TOKEN=$(/usr/bin/mtg-cards-server --config "$CONF" --show-token 2>/dev/null || true)
+    echo ""
+    echo "  MTG Cards Server installiert und gestartet (Port 8765)."
+    echo "  Zugangs-Token für App und Desktop:  $TOKEN"
+    echo "  Token später anzeigen:  sudo mtg-cards-server --show-token"
+    echo "  Weboberfläche:          http://<server-ip>:8765"
+    echo ""
+fi
+exit 0

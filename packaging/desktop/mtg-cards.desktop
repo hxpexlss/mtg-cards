@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MTG Cards
+GenericName=Magic-Kartensammlung
+Comment=Magic: The Gathering Karten verwalten, suchen und vom Handy scannen
+Exec=mtg-cards
+Icon=mtg-cards
+Terminal=false
+Categories=Game;CardGame;Utility;
+Keywords=Magic;MTG;Karten;Sammlung;Scryfall;Commander;
+StartupWMClass=mtg-cards

@@ -1,0 +1,230 @@
+"""Desktop-Anwendung: `mtg-cards`.
+
+Startet den eingebetteten Server (lokale Datenbank oder Proxy zum Headless-Server)
+und zeigt die Oberfläche in einem nativen GTK/WebKit-Fenster an.
+Fallback: Standardbrowser.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+import webbrowser
+from urllib.request import urlopen
+
+from . import APP_NAME, __version__, config
+from .netinfo import local_addresses, tailscale_dns_name
+from .server import Server, test_remote
+
+
+class DesktopSettings:
+    """Einstellungen, die über die Oberfläche geändert werden können."""
+
+    def __init__(self, path, cfg):
+        self.path = path
+        self.cfg = cfg
+        self.server = None
+        self._lock = threading.Lock()
+
+    def public(self):
+        port = self.server.port if self.server else self.cfg["port"]
+        return {
+            "mode": self.cfg.get("mode", "local"),
+            "remote_url": self.cfg.get("remote_url", ""),
+            "remote_token_set": bool(self.cfg.get("remote_token")),
+            "local_token": self.cfg["token"],
+            "port": port,
+            "db_path": self.cfg["db_path"],
+            "addresses": local_addresses(),
+            "tailscale_name": tailscale_dns_name(),
+            "config_path": self.path,
+            "version": __version__,
+        }
+
+    def update(self, data):
+        with self._lock:
+            if "mode" in data:
+                if data["mode"] not in ("local", "remote"):
+                    return {"ok": False, "error": "Ungültiger Modus"}
+                if data["mode"] == "remote":
+                    url = data.get("remote_url", self.cfg.get("remote_url", ""))
+                    token = data.get("remote_token") or self.cfg.get("remote_token", "")
+                    res = test_remote(url, token)
+                    if not res["ok"]:
+                        return res
+                    self.cfg["remote_url"] = res["url"]
+                    self.cfg["remote_token"] = token
+                self.cfg["mode"] = data["mode"]
+            if data.get("regenerate_token"):
+                self.cfg["token"] = config.generate_token()
+                if self.server:
+                    self.server.ctx.token = self.cfg["token"]
+            config.save(self.path, self.cfg)
+            return {"ok": True, **self.public()}
+
+
+def _already_running(port):
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
+            return json.loads(r.read().decode()).get("app") == APP_NAME
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _open_external(uri):
+    try:
+        subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        webbrowser.open(uri)
+
+
+def run_gtk_window(url, local_prefix):
+    """Natives Fenster mit WebKitGTK. Gibt False zurück, wenn GTK/WebKit fehlt."""
+    try:
+        import gi
+        for ver in ("4.1", "4.0"):
+            try:
+                gi.require_version("WebKit2", ver)
+                break
+            except ValueError:
+                continue
+        else:
+            return False
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import GLib, Gtk, WebKit2
+    except (ImportError, ValueError) as e:
+        print(f"[desktop] GTK/WebKit nicht verfügbar ({e}) – nutze Browser", file=sys.stderr)
+        return False
+
+    win = Gtk.Window(title="MTG Cards")
+    win.set_default_size(1320, 880)
+    icon = "/usr/share/icons/hicolor/scalable/apps/mtg-cards.svg"
+    if os.path.exists(icon):
+        try:
+            win.set_icon_from_file(icon)
+        except Exception:  # noqa: BLE001
+            pass
+    view = WebKit2.WebView()
+    settings = view.get_settings()
+    settings.set_property("enable-developer-extras", True)
+    settings.set_property("javascript-can-access-clipboard", True)
+
+    def on_policy(_view, decision, decision_type):
+        types = WebKit2.PolicyDecisionType
+        if decision_type in (types.NAVIGATION_ACTION, types.NEW_WINDOW_ACTION):
+            uri = decision.get_navigation_action().get_request().get_uri() or ""
+            is_local = uri.startswith(local_prefix)
+            if not is_local and not uri.startswith(("about:", "blob:", "data:")):
+                _open_external(uri)          # z.B. Scryfall-Links im Browser öffnen
+                decision.ignore()
+                return True
+            if decision_type == types.NEW_WINDOW_ACTION:
+                view.load_uri(uri)
+                decision.ignore()
+                return True
+        elif decision_type == types.RESPONSE:
+            headers = decision.get_response().get_http_headers()
+            disposition = headers.get_one("Content-Disposition") if headers else None
+            if (disposition and "attachment" in disposition) or not decision.is_mime_type_supported():
+                decision.download()
+                return True
+        return False
+
+    def on_download(_ctx, download):
+        def decide(dl, suggested):
+            dialog = Gtk.FileChooserDialog(title="Export speichern", parent=win,
+                                           action=Gtk.FileChooserAction.SAVE)
+            dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                               Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT)
+            dialog.set_do_overwrite_confirmation(True)
+            dialog.set_current_name(suggested or "mtg-cards-export.json")
+            dialog.set_current_folder(os.path.expanduser("~"))
+            if dialog.run() == Gtk.ResponseType.ACCEPT:
+                dl.set_destination(GLib.filename_to_uri(dialog.get_filename(), None))
+            else:
+                dl.cancel()
+            dialog.destroy()
+            return True
+        download.connect("decide-destination", decide)
+
+    view.connect("decide-policy", on_policy)
+    view.get_context().connect("download-started", on_download)
+    view.load_uri(url)
+    scroller = Gtk.ScrolledWindow()
+    scroller.add(view)
+    win.add(scroller)
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+    return True
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="mtg-cards", description="MTG Cards Desktop")
+    p.add_argument("--config", default=config.DESKTOP_CONFIG_PATH)
+    p.add_argument("--port", type=int, help="Port des eingebetteten Servers")
+    p.add_argument("--browser", action="store_true", help="Im Standardbrowser statt eigenem Fenster öffnen")
+    p.add_argument("--server-only", action="store_true", help="Nur Server starten (kein Fenster)")
+    p.add_argument("--local", action="store_true", help="Lokale Datenbank verwenden (Modus dauerhaft setzen)")
+    p.add_argument("--remote", metavar="URL", help="Mit Headless-Server verbinden (Modus dauerhaft setzen)")
+    p.add_argument("--remote-token", metavar="TOKEN", help="Token des Headless-Servers")
+    p.add_argument("--show-token", action="store_true", help="Token für die Handy-App anzeigen")
+    p.add_argument("--version", action="version", version=__version__)
+    args = p.parse_args(argv)
+
+    cfg = config.load(args.config, config.DESKTOP_DEFAULTS)
+    if args.show_token:
+        print(cfg["token"])
+        return 0
+    if args.local:
+        cfg["mode"] = "local"
+        config.save(args.config, cfg)
+    if args.remote:
+        res = test_remote(args.remote, args.remote_token or cfg.get("remote_token", ""))
+        if not res["ok"]:
+            print(f"Fehler: {res['error']}", file=sys.stderr)
+            return 1
+        cfg.update(mode="remote", remote_url=res["url"],
+                   remote_token=args.remote_token or cfg.get("remote_token", ""))
+        config.save(args.config, cfg)
+    port = args.port or int(cfg["port"])
+
+    server = None
+    if _already_running(port):
+        print(f"[desktop] MTG Cards läuft bereits auf Port {port} – öffne Fenster.")
+    else:
+        settings = DesktopSettings(args.config, cfg)
+        server = Server(cfg["db_path"], cfg["token"], bind=cfg.get("bind", "0.0.0.0"), port=port,
+                        kind="desktop", discovery=cfg.get("discovery", True), desktop=settings)
+        settings.server = server
+        server.start()
+        port = server.port
+        print(f"[desktop] Server läuft auf Port {port} (Modus: {cfg['mode']})")
+
+    local_prefix = f"http://127.0.0.1:{port}"
+    url = f"{local_prefix}/#token={cfg['token']}"
+
+    try:
+        if args.server_only:
+            print(f"Token für die App: {cfg['token']}")
+            while True:
+                time.sleep(3600)
+        elif args.browser or not run_gtk_window(url, local_prefix):
+            webbrowser.open(url)
+            if server:
+                print("Server läuft. Beenden mit Strg+C.")
+                while True:
+                    time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if server:
+            server.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
