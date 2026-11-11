@@ -69,6 +69,12 @@ class CardDetailActivity : AppCompatActivity() {
             append("Seltenheit: ${c.optString("rarity")}\n")
             if (price.isNotBlank() && price != "null") append("Preis: $price €\n")
             if (tags.length() > 0) append("Tags: ").append((0 until tags.length()).joinToString(", ") { tags.getString(it) }).append('\n')
+            val decks = c.optJSONArray("decks")
+            if (decks != null && decks.length() > 0) {
+                append("In Decks: ").append((0 until decks.length()).joinToString(", ") {
+                    val u = decks.getJSONObject(it); "${u.optString("deck")} (${u.optInt("quantity")})"
+                }).append('\n')
+            }
             val kw = c.optJSONArray("keywords")
             if (kw != null && kw.length() > 0) append("Schlüsselwörter: ").append((0 until kw.length()).joinToString(", ") { kw.getString(it) })
         }

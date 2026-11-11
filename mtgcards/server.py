@@ -319,6 +319,7 @@ def r_get(h, qs, cid):
     card = h.ctx.db.get(_card_id(cid))
     if not card:
         raise ApiError(404, "Karte nicht gefunden")
+    card["decks"] = h.ctx.decks.usage_for(card.get("oracle_id"), card["name"])
     h.send_json(card)
 
 
@@ -366,6 +367,8 @@ def r_patch(h, qs, cid):
     res = h.ctx.db.update(_card_id(cid), h.read_json())
     if res is None:
         raise ApiError(404, "Karte nicht gefunden")
+    if not res.get("deleted"):
+        res["decks"] = h.ctx.decks.usage_for(res.get("oracle_id"), res["name"])
     h.send_json(res)
 
 
@@ -387,17 +390,32 @@ def r_refresh(h, qs, cid):
     h.send_json(h.ctx.db.refresh_card_data(card["id"], normalize_card(raw)))
 
 
-def r_refresh_all(h, qs):
-    """Aktualisiert Kartendaten und Preise aller Karten per Scryfall-Sammelabfrage."""
-    cards = h.ctx.db.all()
-    fetched = h.ctx.scryfall.collection(sorted({c["scryfall_id"] for c in cards if c.get("scryfall_id")}))
+def refresh_all(ctx):
+    """Aktualisiert Kartendaten und Preise aller Karten per Scryfall-Sammelabfrage und speichert den Wert."""
+    from .db import now_iso
+    cards = ctx.db.all()
+    fetched = ctx.scryfall.collection(sorted({c["scryfall_id"] for c in cards if c.get("scryfall_id")}))
     updated = 0
     for c in cards:
         raw = fetched.get(c.get("scryfall_id"))
         if raw:
-            h.ctx.db.refresh_card_data(c["id"], normalize_card(raw))
+            ctx.db.refresh_card_data(c["id"], normalize_card(raw))
             updated += 1
-    h.send_json({"updated": updated, "total": len(cards), "missing": len(cards) - updated})
+    ctx.db.set_meta("last_price_refresh", now_iso())
+    ctx.db.snapshot_value()
+    return {"updated": updated, "total": len(cards), "missing": len(cards) - updated}
+
+
+def r_refresh_all(h, qs):
+    h.send_json(refresh_all(h.ctx))
+
+
+def r_stats_detail(h, qs):
+    from .db import now_iso
+    hist = h.ctx.db.value_history(1)
+    if not hist or hist[-1]["day"] != now_iso()[:10]:
+        h.ctx.db.snapshot_value()   # mind. ein Datenpunkt pro Tag, auch ohne Preis-Aktualisierung
+    h.send_json(h.ctx.db.detailed_stats())
 
 
 def r_autocomplete(h, qs):
@@ -538,6 +556,7 @@ ROUTES = [
     ("GET", r"/api/info", r_info),
     ("GET", r"/api/revision", r_revision),
     ("GET", r"/api/stats", r_stats),
+    ("GET", r"/api/stats/detail", r_stats_detail),
     ("GET", r"/api/tags", r_tags),
     ("GET", r"/api/cards", r_list),
     ("POST", r"/api/cards", r_add),
@@ -622,7 +641,7 @@ class Server:
 
     def __init__(self, db_path, token, bind="0.0.0.0", port=8765, kind="server",
                  discovery=True, desktop=None, scryfall=None, tls_cert=None, tls_key=None,
-                 local_http=False):
+                 local_http=False, auto_refresh_hours=0):
         self.db = Database(db_path)
         if scryfall is None:
             scryfall = Scryfall(cache_path=cache_path_for(db_path))
@@ -643,6 +662,33 @@ class Server:
         self.discovery = DiscoveryResponder(self.ctx.port, kind, tls_fingerprint=self.ctx.tls_fingerprint) \
             if discovery else None
         self._threads = []
+        self.auto_refresh_hours = auto_refresh_hours
+        self._stop = threading.Event()
+        self._serving = False
+
+    def _auto_refresh_loop(self):
+        """Aktualisiert Preise regelmäßig (Standard: täglich) und speichert den Sammlungswert."""
+        from datetime import datetime, timezone
+        if self._stop.wait(60):
+            return
+        while not self._stop.is_set():
+            try:
+                if not self.ctx.remote():
+                    last = self.db.get_meta("last_price_refresh")
+                    age = None
+                    if last:
+                        age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600
+                    if age is None or age >= self.auto_refresh_hours:
+                        res = refresh_all(self.ctx)
+                        print(f"[preise] {res['updated']} Karten aktualisiert", flush=True)
+            except Exception as e:  # noqa: BLE001 – offline o.ä.: später erneut versuchen
+                print(f"[preise] Aktualisierung fehlgeschlagen: {e}", flush=True)
+            if self._stop.wait(3600):
+                return
+
+    def _start_background(self):
+        if self.auto_refresh_hours and self.auto_refresh_hours > 0:
+            threading.Thread(target=self._auto_refresh_loop, daemon=True, name="price-refresh").start()
 
     @property
     def port(self):
@@ -653,6 +699,7 @@ class Server:
         return "https" if self.ctx.tls_fingerprint else "http"
 
     def start(self):
+        self._start_background()
         if self.discovery:
             self.discovery.start()
         for srv in self.servers:
@@ -662,6 +709,8 @@ class Server:
         return self
 
     def serve_forever(self):
+        self._serving = True
+        self._start_background()
         if self.discovery:
             self.discovery.start()
         for srv in self.servers[1:]:
@@ -669,8 +718,10 @@ class Server:
         self.httpd.serve_forever()
 
     def stop(self):
+        self._stop.set()
         for srv in self.servers:
-            srv.shutdown()
+            if self._threads or srv is self.httpd and self._serving:
+                srv.shutdown()          # blockiert nur, wenn serve_forever läuft
             srv.server_close()
         if self.discovery:
             self.discovery.stop()

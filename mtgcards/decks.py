@@ -99,6 +99,27 @@ class DeckStore:
             by_name[key] = by_name.get(key, 0) + qty
         return by_oracle, by_name
 
+    def usage_maps(self):
+        """Wo wird welche Karte verwendet? -> (nach oracle_id, nach Name): [{deck_id, deck, quantity}]"""
+        by_oracle, by_name = {}, {}
+        rows = self.db.conn.execute(
+            """SELECT dc.deck_id, d.name, dc.oracle_id, dc.name, SUM(dc.quantity)
+               FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id
+               WHERE dc.board IN ('commander', 'main')
+               GROUP BY dc.deck_id, dc.oracle_id, dc.name""")
+        for deck_id, deck_name, oid, name, qty in rows:
+            entry = {"deck_id": deck_id, "deck": deck_name, "quantity": qty}
+            if oid:
+                by_oracle.setdefault(oid, []).append(entry)
+            by_name.setdefault(name.lower(), []).append(entry)
+        return by_oracle, by_name
+
+    def usage_for(self, oracle_id, name):
+        """Decks, in denen eine Karte steckt (für die Kartendetails)."""
+        with self.db._lock:
+            by_oracle, by_name = self.usage_maps()
+        return (by_oracle.get(oracle_id) if oracle_id else None) or by_name.get((name or "").lower(), [])
+
     def _card_row(self, row):
         d = dict(row)
         d["keywords"] = json.loads(d.get("keywords") or "[]")
@@ -165,10 +186,12 @@ class DeckStore:
             cards = [self._card_row(r) for r in self.db.conn.execute(
                 "SELECT * FROM deck_cards WHERE deck_id=? ORDER BY name COLLATE NOCASE", (deck_id,))]
             by_oracle, by_name = self._owned_maps()
+            use_oracle, use_name = self.usage_maps()
 
         commanders = [c for c in cards if c["board"] == "commander"]
         identity = set("".join(c["color_identity"] or "" for c in commanders))
-        stats = {"cards": 0, "owned": 0, "missing": 0, "basic_lands": 0, "outside_identity": 0}
+        stats = {"cards": 0, "owned": 0, "missing": 0, "basic_lands": 0, "outside_identity": 0, "shared": 0,
+                 "missing_reserved": 0}
         for c in cards:
             owned = by_oracle.get(c["oracle_id"]) if c["oracle_id"] else None
             if owned is None:
@@ -176,6 +199,14 @@ class DeckStore:
             c["owned"] = owned
             c["basic"] = "Basic Land" in (c["type_line"] or "")
             c["missing"] = 0 if c["basic"] else max(0, c["quantity"] - owned)
+            uses = (use_oracle.get(c["oracle_id"]) if c["oracle_id"] else None) or use_name.get(c["name"].lower(), [])
+            c["other_decks"] = [u for u in uses if u["deck_id"] != deck_id]
+            used_elsewhere = sum(u["quantity"] for u in c["other_decks"])
+            c["available"] = max(0, owned - used_elsewhere)   # frei, wenn alle anderen Decks bestückt sind
+            # Reicht der Bestand nur, wenn die Karte aus einem anderen Deck genommen wird?
+            c["shared"] = (not c["basic"] and c["missing"] == 0 and c["board"] in ("commander", "main")
+                           and owned < c["quantity"] + used_elsewhere)
+            c["missing_reserved"] = 0 if c["basic"] else max(0, c["quantity"] - c["available"])
             c["outside_identity"] = bool(commanders) and c["board"] != "commander" and \
                 not set(c["color_identity"] or "") <= identity
             c["group"] = "Commander" if c["board"] == "commander" else next(
@@ -186,6 +217,8 @@ class DeckStore:
                 stats["owned"] += c["quantity"] - c["missing"]
                 stats["basic_lands"] += c["quantity"] if c["basic"] else 0
                 stats["outside_identity"] += 1 if c["outside_identity"] else 0
+                stats["shared"] += 1 if c["shared"] else 0
+                stats["missing_reserved"] += c["missing_reserved"]
         deck["cards"] = cards
         deck["commanders"] = [c["name"] for c in commanders]
         deck["color_identity"] = "".join(x for x in "WUBRG" if x in identity)

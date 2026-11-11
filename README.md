@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.2.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.3.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.2.0_all.deb
+sudo apt install ./mtg-cards-server_1.3.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -125,6 +125,11 @@ Tab **Decks** in der Desktop-/Weboberfläche:
 - In den Kartendetails der Sammlung: **＋ Zu Deck**.
 - In der App: Tab **Decks** mit Fortschritt, „Nur fehlende“ und **Fehlende teilen** (z.B. per Messenger).
 
+- **Geteilte Karten ⇄**: Steckt eine Karte auch in anderen Decks und reicht dein Bestand nicht für alle
+  gleichzeitig, wird sie orange mit ⇄ markiert („auch in: …“). Die Kachel zeigt, wie viele Karten fehlen, um alle
+  Decks gleichzeitig zu bauen. In den Kartendetails der Sammlung steht, in welchen Decks die Karte steckt.
+- Mini-Manakurve pro Deck.
+
 Decks sind im JSON-Export enthalten und werden beim Import wiederhergestellt.
 
 ## Verschlüsselung (HTTPS)
@@ -153,6 +158,16 @@ sudo mtg-cards-server --enable-tls --cert mein-server.tailxxxx.ts.net.crt --key 
 In der App und im Desktop-Server-Modus die Adresse mit `https://` eintragen. Beim ersten Verbinden wird der
 Zertifikats-Fingerabdruck angezeigt – mit dem am PC/Server angezeigten vergleichen und bestätigen. Danach wird
 er bei jeder Verbindung geprüft; ändert sich das Zertifikat, verweigert die App die Verbindung.
+
+## Statistik
+
+Tab **Statistik**: Wert der Sammlung (€ und $), Wertverlauf, Manakurve, Kartentypen, Farbidentitäten, Seltenheiten,
+häufigste Editionen, hinzugefügte Karten pro Monat und die wertvollsten Karten. Alle Diagramme zeigen beim
+Überfahren Details.
+
+Preise werden **automatisch täglich** über Scryfall aktualisiert (Server und Desktop, solange sie laufen) und der
+Sammlungswert pro Tag gespeichert – daraus entsteht der Wertverlauf. Intervall in der Konfiguration:
+`"auto_refresh_hours": 24` (0 = aus).
 
 ## Suche
 

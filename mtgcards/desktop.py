@@ -257,7 +257,8 @@ def main(argv=None):
             server = Server(cfg["db_path"], cfg["token"], bind=cfg.get("bind", "0.0.0.0"), port=port,
                             kind="desktop", discovery=cfg.get("discovery", True), desktop=settings,
                             tls_cert=cfg["tls_cert"] if use_tls else None,
-                            tls_key=cfg["tls_key"] if use_tls else None, local_http=use_tls)
+                            tls_key=cfg["tls_key"] if use_tls else None, local_http=use_tls,
+                            auto_refresh_hours=float(cfg.get("auto_refresh_hours", 24)))
         except OSError as e:
             print(f"[desktop] Port {port} belegt ({e}). Läuft bereits ein MTG-Cards-Server? "
                   f"Anderen Port mit --port wählen.", file=sys.stderr)

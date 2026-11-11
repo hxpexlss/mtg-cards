@@ -56,6 +56,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_cards_print_foil ON cards(scryfall_id, foil
     WHERE scryfall_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_cards_name ON cards(name COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS value_history (
+    day TEXT PRIMARY KEY,
+    value_eur REAL NOT NULL,
+    value_usd REAL NOT NULL,
+    cards INTEGER NOT NULL
+);
 """
 
 SORTS = {
@@ -350,6 +356,99 @@ class Database:
                 counts[t] = counts.get(t, 0) + card["quantity"]
         return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower())))
 
+    @staticmethod
+    def card_price(c, currency="eur"):
+        """Preis einer Karte (Foil-Preis für Foils, sonst normal; Fallback auf den jeweils anderen)."""
+        normal, foil = c.get(f"price_{currency}"), c.get(f"price_{currency}_foil")
+        price = (foil or normal) if c.get("foil") else (normal or foil)
+        try:
+            return float(price) if price else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def get_meta(self, key, default=None):
+        with self._lock:
+            row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+            return row[0] if row else default
+
+    def set_meta(self, key, value):
+        with self._lock:
+            self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)", (key, str(value)))
+            self.conn.commit()
+
+    def snapshot_value(self, day=None):
+        """Speichert den heutigen Sammlungswert (für den Wertverlauf)."""
+        cards = self.all()
+        eur = sum(self.card_price(c, "eur") * c["quantity"] for c in cards)
+        usd = sum(self.card_price(c, "usd") * c["quantity"] for c in cards)
+        day = day or now_iso()[:10]
+        with self._lock:
+            self.conn.execute("INSERT OR REPLACE INTO value_history(day, value_eur, value_usd, cards) VALUES(?,?,?,?)",
+                              (day, round(eur, 2), round(usd, 2), sum(c["quantity"] for c in cards)))
+            self.conn.commit()
+
+    def value_history(self, days=365):
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT day, value_eur, value_usd, cards FROM value_history ORDER BY day DESC LIMIT ?", (days,))
+            return [dict(zip(("day", "value_eur", "value_usd", "cards"), r)) for r in rows][::-1]
+
+    def detailed_stats(self):
+        """Auswertungen für die Statistik-Ansicht."""
+        cards = self.all()
+        total_cards = sum(c["quantity"] for c in cards)
+
+        def bucket(keyfn):
+            out = {}
+            for c in cards:
+                k = keyfn(c)
+                b = out.setdefault(k, {"key": k, "cards": 0, "value_eur": 0.0})
+                b["cards"] += c["quantity"]
+                b["value_eur"] += self.card_price(c) * c["quantity"]
+            for b in out.values():
+                b["value_eur"] = round(b["value_eur"], 2)
+            return sorted(out.values(), key=lambda b: -b["cards"])
+
+        types = ("Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land")
+        front = lambda c: (c["type_line"] or "").split("//")[0]  # noqa: E731
+        rarity_order = ["common", "uncommon", "rare", "mythic", "special", "bonus"]
+        curve = {}
+        for c in cards:
+            if "Land" in front(c) or c["cmc"] is None:
+                continue
+            k = min(int(c["cmc"]), 7)
+            curve[k] = curve.get(k, 0) + c["quantity"]
+        months = {}
+        for c in cards:
+            m = (c["added_at"] or "")[:7]
+            if m:
+                months[m] = months.get(m, 0) + c["quantity"]
+        top = sorted(cards, key=lambda c: -self.card_price(c))[:25]
+        sets = bucket(lambda c: f"{c['set_code']}|{c['set_name'] or ''}")
+        return {
+            "cards": total_cards,
+            "entries": len(cards),
+            "unique_names": len({c["name"] for c in cards}),
+            "foils": sum(c["quantity"] for c in cards if c["foil"]),
+            "value_eur": round(sum(self.card_price(c) * c["quantity"] for c in cards), 2),
+            "value_usd": round(sum(self.card_price(c, "usd") * c["quantity"] for c in cards), 2),
+            "without_price": sum(c["quantity"] for c in cards if not self.card_price(c)),
+            "by_color_identity": bucket(lambda c: c["color_identity"] or "C"),
+            "by_rarity": sorted(bucket(lambda c: c["rarity"] or "?"),
+                                key=lambda b: rarity_order.index(b["key"]) if b["key"] in rarity_order else 99),
+            "by_type": [b for b in bucket(lambda c: next((t for t in types if t in front(c)), "Sonstige"))],
+            "by_set": [dict(b, key=b["key"].split("|")[0], name=b["key"].split("|", 1)[1]) for b in sets[:15]],
+            "set_count": len(sets),
+            "mana_curve": [{"cmc": k, "cards": curve.get(k, 0)} for k in range(0, 8)],
+            "added_per_month": [{"month": k, "cards": months[k]} for k in sorted(months)[-12:]],
+            "top_cards": [{"id": c["id"], "name": c["name"], "set_code": c["set_code"], "foil": c["foil"],
+                           "quantity": c["quantity"], "price_eur": round(self.card_price(c), 2),
+                           "total_eur": round(self.card_price(c) * c["quantity"], 2), "image_url": c["image_url"]}
+                          for c in top if self.card_price(c) > 0],
+            "value_history": self.value_history(),
+            "last_price_refresh": self.get_meta("last_price_refresh"),
+        }
+
     def stats(self):
         cards = self.all()
         by_color = {}
@@ -357,11 +456,7 @@ class Database:
         for c in cards:
             key = c["color_identity"] or "C"
             by_color[key] = by_color.get(key, 0) + c["quantity"]
-            price = c["price_eur_foil"] if c["foil"] and c["price_eur_foil"] else c["price_eur"]
-            try:
-                value_eur += float(price or 0) * c["quantity"]
-            except ValueError:
-                pass
+            value_eur += self.card_price(c) * c["quantity"]
         return {
             "entries": len(cards),
             "cards": sum(c["quantity"] for c in cards),

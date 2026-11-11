@@ -12,9 +12,11 @@ function showTab(tab) {
   $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#collection-view").classList.toggle("hidden", tab !== "collection");
   $("#decks-view").classList.toggle("hidden", tab !== "decks");
+  $("#stats-view").classList.toggle("hidden", tab !== "stats");
   $(".searchbox").style.visibility = tab === "collection" ? "" : "hidden";
   store("mtg-tab", tab);
   if (tab === "decks") loadDecks();
+  if (tab === "stats" && typeof loadStats === "function") loadStats();
 }
 
 function decksVisible() { return !$("#decks-view").classList.contains("hidden"); }
@@ -82,7 +84,9 @@ function renderDeck(d) {
       <div class="stat good"><b>${st.owned}</b>vorhanden</div>
       <div class="stat ${st.missing ? "bad" : "good"}"><b>${st.missing}</b>fehlen</div>
       ${st.basic_lands ? `<div class="stat"><b>${st.basic_lands}</b>Standardländer</div>` : ""}
+      ${st.shared ? `<div class="stat warn" title="Diese Karten besitzt du, sie stecken aber auch in anderen Decks. Um alle Decks gleichzeitig zu bauen, fehlen ${st.missing_reserved}."><b>${st.shared}</b>mit anderen Decks geteilt ⇄</div>` : ""}
       ${d.commanders.length ? `<div class="stat ${st.outside_identity ? "bad" : "good"}"><b>${st.outside_identity}</b>außerhalb der Farbidentität</div>` : ""}
+      ${deckCurveHtml(d)}
     </div>
     <div class="deck-add">
       <div class="ac-wrap"><input id="deck-add-name" list="deck-ac" placeholder="Karte hinzufügen (Name) …" autocomplete="off">
@@ -100,10 +104,26 @@ function renderDeck(d) {
     }).join("")}</div>`;
 }
 
+/** Mini-Manakurve des Decks (ohne Länder, nur Deck + Commander). */
+function deckCurveHtml(d) {
+  const curve = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (const c of d.cards) {
+    if (!["main", "commander"].includes(c.board) || (c.type_line || "").split("//")[0].includes("Land") || c.cmc == null) continue;
+    curve[Math.min(7, Math.floor(c.cmc))] += c.quantity;
+  }
+  const max = Math.max(...curve, 1);
+  if (!curve.some(Boolean)) return "";
+  return `<div class="stat mini-curve" title="Manakurve">${curve.map((n, i) =>
+    `<span data-n="${n}" title="Manawert ${i === 7 ? "7+" : i}: ${n} Karten"><i style="height:${n ? Math.max(8, 100 * n / max) : 0}%"></i><em>${i === 7 ? "7+" : i}</em></span>`).join("")}</div>`;
+}
+
 function deckCardHtml(c) {
-  const cls = c.basic ? "basic" : (c.missing ? "miss" : "own");
-  const status = c.basic ? "–" : (c.missing ? "✗" : "✓");
-  const tip = c.basic ? "Standardland" : `${c.owned} in der Sammlung`;
+  const cls = c.basic ? "basic" : (c.missing ? "miss" : (c.shared ? "shared" : "own"));
+  const status = c.basic ? "–" : (c.missing ? "✗" : (c.shared ? "⇄" : "✓"));
+  const others = (c.other_decks || []).map((u) => `${u.deck} (${u.quantity})`).join(", ");
+  let tip = c.basic ? "Standardland" : `${c.owned} in der Sammlung`;
+  if (others) tip += ` · auch in: ${others}`;
+  if (c.shared) tip += " – reicht nicht für alle Decks gleichzeitig";
   return `<div class="dc ${cls}" data-dc="${c.id}">
     <span class="q">${c.quantity}</span>
     <span class="st" title="${esc(tip)}">${status}</span>
@@ -288,11 +308,12 @@ function bindDecks() {
     pv.style.left = Math.min(e.clientX + 24, innerWidth - 260) + "px";
     pv.style.top = Math.max(10, Math.min(e.clientY - 120, innerHeight - 350)) + "px";
   });
-  if (store("mtg-tab") === "decks") showTab("decks");
+  if (["decks", "stats"].includes(store("mtg-tab"))) setTimeout(() => showTab(store("mtg-tab")), 0);
 }
 
 function onRevisionChange() {
   if (decksVisible() && decks.current) openDeck(decks.current.id);
+  if (!$("#stats-view").classList.contains("hidden") && typeof loadStats === "function") loadStats();
 }
 
 bindDecks();

@@ -62,7 +62,8 @@ def main(argv=None):
     use_tls = bool(cfg.get("tls"))
     srv = Server(db_path, cfg["token"], bind=bind, port=port, kind="server",
                  discovery=cfg.get("discovery", True) and not args.no_discovery,
-                 tls_cert=cfg["tls_cert"] if use_tls else None, tls_key=cfg["tls_key"] if use_tls else None)
+                 tls_cert=cfg["tls_cert"] if use_tls else None, tls_key=cfg["tls_key"] if use_tls else None,
+                 auto_refresh_hours=float(cfg.get("auto_refresh_hours", 24)))
 
     def _stop(*_):
         raise KeyboardInterrupt

@@ -61,6 +61,8 @@ class DeckActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.deckSummary).text = buildString {
             append("${st.optInt("cards")} Karten · ${st.optInt("owned")} vorhanden · ${st.optInt("missing")} fehlen")
             if (ci.isNotBlank()) append(" · Farbidentität $ci")
+            if (st.optInt("shared") > 0) append("\n⇄ ${st.optInt("shared")} Karte(n) mit anderen Decks geteilt – " +
+                "für alle Decks gleichzeitig fehlen ${st.optInt("missing_reserved")}")
             if (st.optInt("outside_identity") > 0) append("\n⚠ ${st.optInt("outside_identity")} Karte(n) außerhalb der Farbidentität")
         }
         val container = findViewById<LinearLayout>(R.id.deckCards)
@@ -87,18 +89,24 @@ class DeckActivity : AppCompatActivity() {
                 val basic = c.optBoolean("basic")
                 val missing = c.optInt("missing")
                 container.addView(TextView(this).apply {
+                    val shared = c.optBoolean("shared")
                     val status = when {
                         basic -> "–"
                         missing > 0 -> "✗"
+                        shared -> "⇄"
                         else -> "✓"
                     }
+                    val od = c.optJSONArray("other_decks")
+                    val others = (0 until (od?.length() ?: 0)).joinToString(", ") { od!!.getJSONObject(it).optString("deck") }
                     val owned = c.optInt("owned")
                     val extra = if (missing > 0 && owned > 0) "  ($owned/${c.optInt("quantity")})" else ""
                     val warn = if (c.optBoolean("outside_identity")) "  ⚠" else ""
-                    text = "$status  ${c.optInt("quantity")}  ${c.optString("name")}$extra$warn"
+                    val also = if (others.isNotBlank()) "\n      auch in: $others" else ""
+                    text = "$status  ${c.optInt("quantity")}  ${c.optString("name")}$extra$warn$also"
                     textSize = 15f
                     setPadding(0, (3 * dp).toInt(), 0, (3 * dp).toInt())
-                    if (!basic) setTextColor(if (missing > 0) Color.rgb(229, 72, 77) else currentTextColor)
+                    if (!basic && missing > 0) setTextColor(Color.rgb(229, 72, 77))
+                    else if (!basic && shared) setTextColor(Color.rgb(226, 160, 63))
                 })
             }
         }

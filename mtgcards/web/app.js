@@ -194,6 +194,8 @@ function renderDetail(c) {
           ${c.tags.map((t) => `<span class="tag t-${esc(t.replace(/\W/g, ""))}">${esc(t)} <span class="rm" data-rm="${esc(t)}">×</span></span>`).join("")}
           <input placeholder="Tag hinzufügen ↵" data-act="addtag"></div></dd>
         <dt>Notizen</dt><dd><textarea rows="2" data-act="notes">${esc(c.notes)}</textarea></dd>
+        <dt>In Decks</dt><dd>${(c.decks || []).length ? c.decks.map((u) => `${esc(u.deck)} (${u.quantity})`).join(", ")
+          + ((c.decks || []).reduce((s, u) => s + u.quantity, 0) > c.quantity ? ` <span style="color:var(--accent2)">⇄ mehr verplant als vorhanden</span>` : "") : "–"}</dd>
         <dt>Hinzugefügt</dt><dd>${esc(new Date(c.added_at).toLocaleString("de-DE"))}</dd>
       </dl>
       <div class="row">
