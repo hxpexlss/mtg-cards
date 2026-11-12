@@ -53,6 +53,23 @@ object Prefs {
         sp(ctx).edit().putBoolean("default_foil", value).apply()
     }
 
+    /** Code-Modus: nur den unteren Kartenrand (Set-Code + Nummer) scannen. */
+    fun codeMode(ctx: Context): Boolean = sp(ctx).getBoolean("code_mode", false)
+    fun setCodeMode(ctx: Context, value: Boolean) {
+        sp(ctx).edit().putBoolean("code_mode", value).apply()
+    }
+
+    /** Fest eingestellte Edition (leer = automatisch: zuletzt sicher erkannte Edition). */
+    fun fixedSet(ctx: Context): String = sp(ctx).getString("fixed_set", "") ?: ""
+    fun setFixedSet(ctx: Context, value: String) {
+        sp(ctx).edit().putString("fixed_set", value.trim().uppercase()).apply()
+    }
+
+    fun lastSet(ctx: Context): String = sp(ctx).getString("last_set", "") ?: ""
+    fun setLastSet(ctx: Context, value: String) {
+        sp(ctx).edit().putString("last_set", value.trim().uppercase()).apply()
+    }
+
     fun landscape(ctx: Context): Boolean = sp(ctx).getBoolean("landscape", false)
     fun setLandscape(ctx: Context, value: Boolean) {
         sp(ctx).edit().putBoolean("landscape", value).apply()

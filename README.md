@@ -41,7 +41,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.10.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.11.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -56,7 +56,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.10.0_all.deb
+sudo apt install ./mtg-cards-server_1.11.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -91,6 +91,14 @@ deaktivieren** („Nicht optimieren“/„Uneingeschränkt“) und in Tailscale 
   HTTPS (siehe unten). **Den Port nicht direkt ins Internet freigeben**.
 
 ## Scannen
+
+**Code-Modus (genauester Druck):** Im Seitenmenü „Nur unteren Rand scannen“ einschalten und die Zeile unten links
+(z.B. `0077` und `FDN • DE`) in den flachen Streifen halten – Set-Code und Sammlernummer bestimmen den Druck
+eindeutig, inklusive Sprache. Für Karten ab ca. 2014.
+
+**Druck im Namens-Modus:** Set-Code und Nummer werden über mehrere Kamerabilder gelesen; ist unten nichts lesbar,
+wird die zuletzt sicher erkannte (oder eine fest eingestellte) Edition bevorzugt. Das Ergebnis zeigt, ob der Druck
+erkannt oder geraten wurde – mit **„Druck ändern“** (auch in der Stapel-Zusammenfassung) wählst du den richtigen.
 
 **Seitenmenü** (Symbol oben rechts) mit allen Scan-Einstellungen: **Ziel-Deck** (gescannte Karten kommen zusätzlich
 direkt in dieses Deck), Kartensprache, automatisch hinzufügen, Stapel-Modus, Proxy, Foil, Querformat-Rahmen und Ton.

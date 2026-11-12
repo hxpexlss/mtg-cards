@@ -12,6 +12,8 @@ data class Region(val left: Float, val top: Float, val right: Float, val bottom:
     fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
 }
 
+data class CodeResult(val setCode: String?, val collectorNumber: String?, val lang: String?)
+
 data class ScanResult(
     val name: String?,
     val setCode: String?,
@@ -31,6 +33,8 @@ object CardTextParser {
     private val CN_SLASH = Regex("""\b0*(\d{1,4}[a-z]?)\s*/\s*\d{1,4}\b""")
     private val CN_RARITY_BEFORE = Regex("""(?:^|\s)[CURMSLTP]\s+0*(\d{1,4}[a-z]?)\b""")
     private val CN_RARITY_AFTER = Regex("""(?:^|\s)0*(\d{1,4}[a-z]?)\s+[CURMSLTP](?:\s|$)""")
+    /** Neue Kartenrahmen: Nummer mit führender Null, z.B. "0077" (ohne "/Gesamtzahl"). */
+    private val CN_PADDED = Regex("""(?:^|\s)(0\d{2,3}[a-z]?)(?:\s|$)""")
     private val SET_LANG = Regex(
         """\b([A-Z0-9]{3,5})\s*[•·*.\-]?\s*(EN|DE|FR|IT|ES|PT|JA|JP|KO|RU|ZHS|ZHT|CS|CT|PH)\b"""
     )
@@ -58,12 +62,35 @@ object CardTextParser {
             .take(3)
 
         val bottomRegion = Region(card.left - 0.04f * w, card.bottom - 0.13f * h, card.left + 0.65f * w, card.bottom + 0.05f * h)
-        val bottom = lines.filter { bottomRegion.contains(it.cx, it.cy) }.joinToString("\n") { it.text }
+        val code = collectorInfo(lines.filter { bottomRegion.contains(it.cx, it.cy) })
+        val set = code.setCode
+        val cn = code.collectorNumber
+        val lang = code.lang
 
-        val cn = CN_SLASH.find(bottom)?.groupValues?.get(1)
-            ?: CN_RARITY_BEFORE.find(bottom)?.groupValues?.get(1)
-            ?: CN_RARITY_AFTER.find(bottom)?.groupValues?.get(1)
-        val setMatch = SET_LANG.find(bottom.uppercase())
+        val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
+        return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang)
+    }
+
+    /**
+     * Code-Modus: Nur der untere Kartenrand liegt im Rahmen (z.B. "0077 R" und "FDN • DE").
+     * Gibt Set-Code, Sammlernummer und Sprache zurück (je null, wenn nicht lesbar).
+     */
+    fun parseCode(lines: List<OcrLine>, strip: Region): CodeResult {
+        val padX = (strip.right - strip.left) * 0.06f
+        val padY = (strip.bottom - strip.top) * 0.35f
+        val area = Region(strip.left - padX, strip.top - padY, strip.right + padX, strip.bottom + padY)
+        return collectorInfo(lines.filter { area.contains(it.cx, it.cy) })
+    }
+
+    /** Set-Code, Sammlernummer und Sprache aus den Textzeilen am unteren Rand. */
+    fun collectorInfo(lines: List<OcrLine>): CodeResult {
+        val text = lines.sortedBy { it.top }.joinToString("\n") { it.text }
+        val cn = (CN_SLASH.find(text)?.groupValues?.get(1)
+            ?: CN_RARITY_BEFORE.find(text)?.groupValues?.get(1)
+            ?: CN_RARITY_AFTER.find(text)?.groupValues?.get(1)
+            ?: CN_PADDED.find(text)?.groupValues?.get(1))
+            ?.trimStart('0')?.ifEmpty { "0" }
+        val setMatch = SET_LANG.find(text.uppercase())
         val set = setMatch?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
         val lang = setMatch?.groupValues?.get(2)?.let { code ->
             when (code) {
@@ -74,9 +101,7 @@ object CardTextParser {
                 else -> code.lowercase()
             }
         }
-
-        val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
-        return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang)
+        return CodeResult(set, cn, lang)
     }
 
     /** Entfernt Mana-Symbole/OCR-Müll: behält nur Wörter, die überwiegend aus Buchstaben bestehen. */
