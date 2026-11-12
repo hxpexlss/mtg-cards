@@ -27,7 +27,7 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
     private lateinit var count: TextView
     private lateinit var adapter: CardAdapter
     private val colors = linkedSetOf<String>()
-    private var tag = ""
+    private var tagFilter = ""   // bewusst nicht "tag": kollidiert sonst mit View.tag in apply-Blöcken
     private var dupMin = 0
     private var job: Job? = null
 
@@ -42,47 +42,41 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
             adapter = this@SearchFragment.adapter
         }
 
+        val inflater = LayoutInflater.from(requireContext())
+        fun filterChip(group: ChipGroup, label: String, key: String): Chip =
+            (inflater.inflate(R.layout.item_filter_chip, group, false) as Chip).apply {
+                id = View.generateViewId()
+                text = label
+                tag = key          // View-Tag: Filterwert
+                group.addView(this)
+            }
+
+        // Farben: mehrere gleichzeitig möglich
         val colorGroup = view.findViewById<ChipGroup>(R.id.colorChips)
         for ((code, label) in listOf("W" to "Weiß", "U" to "Blau", "B" to "Schwarz", "R" to "Rot", "G" to "Grün", "C" to "Farblos")) {
-            colorGroup.addView(Chip(requireContext()).apply {
-                text = label
-                isCheckable = true
-                setOnCheckedChangeListener { _, checked ->
-                    if (checked) colors.add(code) else colors.remove(code)
-                    search()
-                }
-            })
+            filterChip(colorGroup, label, code)
         }
+        colorGroup.setOnCheckedStateChangeListener { group, ids ->
+            colors.clear()
+            ids.forEach { cid -> group.findViewById<Chip>(cid)?.tag?.let { colors.add(it.toString()) } }
+            search()
+        }
+
+        // Tags: höchstens einer (singleSelection im Layout)
         val tagGroup = view.findViewById<ChipGroup>(R.id.tagChips)
-        for (t in listOf("Commander", "Partner", "Companion")) {
-            tagGroup.addView(Chip(requireContext()).apply {
-                text = t
-                isCheckable = true
-                setOnCheckedChangeListener { _, checked ->
-                    if (checked) {
-                        tag = t
-                        for (i in 0 until tagGroup.childCount) {
-                            val other = tagGroup.getChildAt(i) as Chip
-                            if (other !== this && other.text.toString() in listOf("Commander", "Partner", "Companion")) {
-                                other.isChecked = false
-                            }
-                        }
-                    } else if (tag == t) {
-                        tag = ""
-                    }
-                    search()
-                }
-            })
+        for (t in listOf("Commander", "Partner", "Companion")) filterChip(tagGroup, t, t)
+        tagGroup.setOnCheckedStateChangeListener { group, ids ->
+            tagFilter = ids.firstOrNull()?.let { group.findViewById<Chip>(it)?.tag?.toString() } ?: ""
+            search()
         }
-        tagGroup.isSingleSelection = false
-        tagGroup.addView(Chip(requireContext()).apply {
-            text = "Doppelte (ab 2)"
-            isCheckable = true
-            setOnCheckedChangeListener { _, checked ->
-                dupMin = if (checked) 2 else 0
-                search()
-            }
-        })
+
+        // Doppelte: unabhängig von den Tags kombinierbar
+        val dupGroup = view.findViewById<ChipGroup>(R.id.dupChips)
+        filterChip(dupGroup, "Doppelte (ab 2)", "2")
+        dupGroup.setOnCheckedStateChangeListener { _, ids ->
+            dupMin = if (ids.isNotEmpty()) 2 else 0
+            search()
+        }
         view.findViewById<android.widget.Button>(R.id.btnSets).setOnClickListener {
             startActivity(Intent(requireContext(), SetsActivity::class.java))
         }
@@ -100,7 +94,7 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
         job = viewLifecycleOwner.lifecycleScope.launch {
             if (delayMs > 0) delay(delayMs)
             try {
-                val res = Api.fromPrefs(requireContext()).search(input.text.toString(), colors.joinToString(""), tag,
+                val res = Api.fromPrefs(requireContext()).search(input.text.toString(), colors.joinToString(""), tagFilter,
                     dupMin = dupMin)
                 val arr = res.getJSONArray("cards")
                 val items = (0 until arr.length()).map { arr.getJSONObject(it) }
