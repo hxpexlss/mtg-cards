@@ -9,7 +9,9 @@ import mimetypes
 import os
 import re
 import socket
+import sqlite3
 import threading
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
@@ -17,9 +19,9 @@ from urllib.request import Request, urlopen
 
 from . import APP_NAME, __version__
 from .db import Database
-from .decks import DeckStore
+from .decks import DECK_BOARDS, DeckStore, parse_decklist
 from .wishlist import Wishlist
-from .importexport import export_csv, export_json, import_cards
+from .importexport import ImportAborted, export_csv, export_json, import_cards
 from .netinfo import DiscoveryResponder, local_addresses, tailscale_dns_name
 from . import tls
 from .scryfall import Scryfall, ScryfallError, normalize_card
@@ -47,6 +49,26 @@ class AppContext:
         self.port = port
         self.desktop = desktop      # DesktopSettings-Objekt (nur Desktop)
         self.tls_fingerprint = None
+        # Schutz vor doppeltem Speichern: Antworten auf Anfragen mit request_id werden gemerkt. Wiederholt die
+        # App eine Anfrage (Timeout, Funkloch, Warteschlange), bekommt sie die alte Antwort statt neuer Karten.
+        self._idem = OrderedDict()
+        self._idem_lock = threading.Lock()
+
+    def once(self, request_id, func):
+        """Führt func() pro request_id nur einmal aus. Gibt (status, daten, wiederholt) zurück."""
+        rid = str(request_id or "").strip()[:100]
+        if not rid:
+            status, data = func()
+            return status, data, False
+        with self._idem_lock:       # Wiederholung wartet, bis die erste Anfrage fertig ist
+            if rid in self._idem:
+                status, data = self._idem[rid]
+                return status, data, True
+            status, data = func()
+            self._idem[rid] = (status, data)
+            while len(self._idem) > 2000:
+                self._idem.popitem(last=False)
+            return status, data, False
 
     def remote(self):
         """(url, token, fingerprint) wenn der Desktop im Remote-Modus läuft, sonst None."""
@@ -104,7 +126,12 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def read_body(self):
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise ApiError(400, "Ungültige Content-Length") from None
+        if length < 0:
+            raise ApiError(400, "Ungültige Content-Length")
         if length > MAX_BODY:
             raise ApiError(413, "Anfrage zu groß")
         return self.rfile.read(length) if length else b""
@@ -114,9 +141,12 @@ class Handler(BaseHTTPRequestHandler):
         if not raw:
             return {}
         try:
-            return json.loads(raw.decode("utf-8"))
+            data = json.loads(raw.decode("utf-8"))
         except ValueError:
             raise ApiError(400, "Ungültiges JSON") from None
+        if not isinstance(data, dict):
+            raise ApiError(400, "JSON-Objekt erwartet")
+        return data
 
     # -- Auth ----------------------------------------------------------------
     def _token_from_request(self, qs):
@@ -283,8 +313,28 @@ class Handler(BaseHTTPRequestHandler):
 def _card_id(s):
     try:
         return int(s)
-    except ValueError:
+    except (TypeError, ValueError):
         raise ApiError(400, "Ungültige ID") from None
+
+
+def _int(value, what="Zahl", default=None):
+    """Ganzzahl aus einer Anfrage lesen; leere Werte -> default, Unsinn -> 400 statt interner Fehler."""
+    if value in (None, ""):
+        if default is None:
+            raise ApiError(400, f"{what} fehlt")
+        return default
+    if isinstance(value, bool):
+        raise ApiError(400, f"Ungültige {what}")
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            f = float(str(value).replace(",", "."))
+            if f == int(f):
+                return int(f)
+        except (TypeError, ValueError, OverflowError):
+            pass
+        raise ApiError(400, f"Ungültige {what}: {value!r}") from None
 
 
 def r_info(h, qs):
@@ -313,17 +363,18 @@ def r_tags(h, qs):
 
 def r_list(h, qs):
     foil = _first(qs, "foil")
+    dup_min = _int(_first(qs, "dup_min"), "Mindestanzahl (dup_min)", 0)
     cards, total = h.ctx.db.search(
         q=_first(qs, "q"), ci=_first(qs, "ci"), ci_mode=_first(qs, "ci_mode", "within"),
         tag=_first(qs, "tag"), type_=_first(qs, "type"), rarity=_first(qs, "rarity"),
         set_code=_first(qs, "set"), foil=None if foil == "" else foil in ("1", "true"),
-        dup_min=_first(qs, "dup_min", "0") or 0,
-        sort=_first(qs, "sort", "name"), limit=_first(qs, "limit", "500"),
-        offset=_first(qs, "offset", "0"),
+        dup_min=dup_min,
+        sort=_first(qs, "sort", "name"), limit=_int(_first(qs, "limit"), "Anzahl (limit)", 500),
+        offset=_int(_first(qs, "offset"), "Position (offset)", 0),
     )
     res = {"total": total, "cards": cards, "revision": h.ctx.db.revision()}
-    if int(_first(qs, "dup_min", "0") or 0) > 1:
-        res["duplicates"] = h.ctx.db.duplicate_summary(int(_first(qs, "dup_min")))
+    if dup_min > 1:
+        res["duplicates"] = h.ctx.db.duplicate_summary(dup_min)
     h.send_json(res)
 
 
@@ -371,13 +422,15 @@ def _add_one(h, data):
     has_code = (data.get("set") or data.get("set_code")) and (data.get("cn") or data.get("collector_number"))
     if not (data.get("name") or data.get("scryfall_id") or data.get("id") or has_code):
         raise ApiError(400, "name, scryfall_id oder Set + Sammlernummer angeben")
+    qty = max(1, _int(data.get("quantity"), "Anzahl", 1))
+    tags = data.get("tags") or []
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    if not isinstance(tags, list):
+        raise ApiError(400, "tags muss eine Liste sein")
     card = normalize_card(_lookup_from(h, data))
-    try:
-        qty = int(data.get("quantity") or 1)
-    except ValueError:
-        raise ApiError(400, "Ungültige Anzahl") from None
     row, created = h.ctx.db.add(card, foil=bool(data.get("foil")), quantity=qty,
-                                tags=data.get("tags") or [], notes=data.get("notes") or "")
+                                tags=tags, notes=str(data.get("notes") or ""))
     row["created"] = created
     row["owned"] = h.ctx.db.find_owned(row["scryfall_id"], row["oracle_id"])
     # Proxies erfüllen keine Wünsche
@@ -396,29 +449,49 @@ def _add_one(h, data):
 
 
 def r_add(h, qs):
-    row, created = _add_one(h, h.read_json())
-    h.send_json(row, 201 if created else 200)
+    data = h.read_json()
+
+    def run():
+        row, created = _add_one(h, data)
+        return (201 if created else 200), row
+
+    status, row, repeated = h.ctx.once(data.get("request_id"), run)
+    h.send_json(dict(row, repeated=True) if repeated else row, 200 if repeated else status)
 
 
 def r_add_batch(h, qs):
     """Stapel-Scan: viele Karten auf einmal speichern. Fehler einzelner Karten brechen nicht ab."""
     data = h.read_json()
-    results, errors, wishes = [], [], []
-    for i, item in enumerate(data.get("cards") or []):
-        try:
-            row, created = _add_one(h, item)
-            results.append({"index": i, "id": row["id"], "name": row["name"], "quantity": row["quantity"],
-                            "created": created})
-            wishes += row["wish_fulfilled"]
-        except (ApiError, ScryfallError) as e:
-            errors.append({"index": i, "name": item.get("name") or item.get("scryfall_id"), "error": str(e)})
-    h.send_json({"added": sum(int(c.get("quantity") or 1) for i, c in enumerate(data.get("cards") or [])
-                              if any(r["index"] == i for r in results)),
-                 "results": results, "errors": errors, "wish_fulfilled": wishes})
+    cards = data.get("cards") or []
+    if not isinstance(cards, list):
+        raise ApiError(400, "cards muss eine Liste sein")
+
+    def run():
+        results, errors, wishes = [], [], []
+        added = 0
+        for i, item in enumerate(cards):
+            if not isinstance(item, dict):
+                errors.append({"index": i, "name": str(item)[:80], "error": "Ungültiger Eintrag (Objekt erwartet)"})
+                continue
+            try:
+                row, created = _add_one(h, item)
+                results.append({"index": i, "id": row["id"], "name": row["name"], "quantity": row["quantity"],
+                                "created": created})
+                added += max(1, _int(item.get("quantity"), "Anzahl", 1))
+                wishes += row["wish_fulfilled"]
+            except (ApiError, ScryfallError) as e:
+                errors.append({"index": i, "name": item.get("name") or item.get("scryfall_id")
+                               or f"{item.get('set') or ''} {item.get('cn') or ''}".strip(), "error": str(e)})
+        return 200, {"added": added, "results": results, "errors": errors, "wish_fulfilled": wishes}
+
+    _, res, repeated = h.ctx.once(data.get("request_id"), run)
+    h.send_json(dict(res, repeated=True) if repeated else res)
 
 
 def r_patch(h, qs, cid):
     data = h.read_json()
+    if "quantity" in data:
+        data["quantity"] = _int(data["quantity"], "Anzahl")
     new_id = data.pop("scryfall_id", None)
     if new_id:
         # Anderen Druck übernehmen (Edition / Sprache korrigieren)
@@ -454,11 +527,18 @@ def r_refresh(h, qs, cid):
     if not card:
         raise ApiError(404, "Karte nicht gefunden")
     if card.get("scryfall_id"):
-        raw = h.ctx.scryfall.lookup(scryfall_id=card["scryfall_id"])
+        # ohne Cache: „Aktualisieren“ soll wirklich die heutigen Preise holen
+        fresh = getattr(h.ctx.scryfall, "fresh_card", None)
+        raw = fresh(card["scryfall_id"]) if fresh else h.ctx.scryfall.lookup(scryfall_id=card["scryfall_id"])
     else:
         raw = h.ctx.scryfall.lookup(name=card["name"], set_code=card.get("set_code"),
                                     collector_number=card.get("collector_number"))
-    h.send_json(h.ctx.db.refresh_card_data(card["id"], normalize_card(h.ctx.scryfall.with_prices(raw))))
+    new = normalize_card(h.ctx.scryfall.with_prices(raw))
+    try:
+        h.send_json(h.ctx.db.refresh_card_data(card["id"], new))
+    except sqlite3.IntegrityError:
+        # Karte ohne Scryfall-ID gehört zu einem Druck, der schon als eigener Eintrag existiert -> zusammenführen
+        h.send_json(h.ctx.db.change_print(card["id"], new))
 
 
 def refresh_all(ctx):
@@ -542,6 +622,8 @@ def r_import(h, qs):
         text = raw.decode("latin-1")
     try:
         result = import_cards(h.ctx.db, h.ctx.scryfall, text, mode=mode)
+    except ImportAborted as e:
+        raise ApiError(400, str(e)) from None
     except ValueError as e:
         raise ApiError(400, f"Datei konnte nicht gelesen werden: {e}") from None
     h.send_json(result)
@@ -561,14 +643,25 @@ def r_decks(h, qs):
 
 def r_deck_create(h, qs):
     data = h.read_json()
+    text = str(data.get("list") or "").strip()
+    if text and not parse_decklist(text):
+        # vor dem Anlegen prüfen – sonst bliebe ein leeres Deck zurück
+        raise ApiError(400, "Keine Karten in der Liste erkannt – das Deck wurde nicht angelegt")
     try:
         deck = h.ctx.decks.create(data.get("name"), data.get("format") or "commander", data.get("notes") or "",
                                   status=data.get("status") or "build")
     except ValueError as e:
         raise ApiError(400, str(e)) from None
     result = {"deck": deck, "errors": []}
-    if (data.get("list") or "").strip():
-        res = h.ctx.decks.import_list(deck["id"], h.ctx.scryfall, data["list"])
+    if text:
+        try:
+            res = h.ctx.decks.import_list(deck["id"], h.ctx.scryfall, text)
+        except ScryfallError:
+            h.ctx.decks.delete(deck["id"])   # z.B. Scryfall nicht erreichbar: kein halbes Deck zurücklassen
+            raise
+        except ValueError as e:
+            h.ctx.decks.delete(deck["id"])
+            raise ApiError(400, str(e)) from None
         result = {"deck": res["deck"], "errors": res["errors"]}
     h.send_json(result, 201)
 
@@ -608,13 +701,16 @@ def r_deck_add_card(h, qs, did):
         if not (data.get("name") or data.get("scryfall_id")):
             raise ApiError(400, "name, scryfall_id oder collection_id angeben")
         card = normalize_card(_lookup_from(h, data))
-    deck = h.ctx.decks.set_card(_card_id(did), card, int(data.get("quantity") or 1),
-                                data.get("board") or "main", add=data.get("add", True))
+    deck = h.ctx.decks.set_card(_card_id(did), card, _int(data.get("quantity"), "Anzahl", 1),
+                                data.get("board") or "main", add=bool(data.get("add", True)))
     h.send_json(_deck_or_404(deck))
 
 
 def r_deck_card_patch(h, qs, cid):
-    h.send_json(_deck_or_404(h.ctx.decks.update_card(_card_id(cid), h.read_json())))
+    data = h.read_json()
+    if "quantity" in data:
+        data["quantity"] = _int(data["quantity"], "Anzahl")
+    h.send_json(_deck_or_404(h.ctx.decks.update_card(_card_id(cid), data)))
 
 
 def r_deck_card_delete(h, qs, cid):
@@ -658,7 +754,7 @@ def r_wish_add(h, qs):
                 price, pset = best
         except ScryfallError:
             pass
-    item = h.ctx.wishlist.add(card, int(data.get("quantity") or 1), _parse_price(data.get("max_price_eur")),
+    item = h.ctx.wishlist.add(card, max(1, _int(data.get("quantity"), "Anzahl", 1)), _parse_price(data.get("max_price_eur")),
                               any_print=any_print, foil=foil, notes=data.get("notes") or "",
                               price=price, price_set=pset)
     h.send_json(item, 201)
@@ -668,6 +764,8 @@ def r_wish_patch(h, qs, wid):
     data = h.read_json()
     if "max_price_eur" in data:
         data["max_price_eur"] = _parse_price(data["max_price_eur"])
+    if "quantity" in data:
+        data["quantity"] = _int(data["quantity"], "Anzahl")
     res = h.ctx.wishlist.update(_card_id(wid), data)
     if res is None:
         raise ApiError(404, "Wunsch nicht gefunden")
@@ -689,7 +787,7 @@ def r_deck_to_wishlist(h, qs, did):
     deck = _deck_or_404(h.ctx.decks.get(_card_id(did)))
     added = []
     for c in deck["cards"]:
-        if c["board"] not in ("commander", "main") or c["missing"] <= 0:
+        if c["board"] not in DECK_BOARDS or c["missing"] <= 0:
             continue
         price = pset = None
         try:
@@ -713,8 +811,8 @@ _MAIN_RARITIES = ("common", "uncommon", "rare", "mythic")
 def _is_main(card, printed_size):
     """Grundset = Sammlernummer innerhalb der gedruckten Setgröße (ohne Showcase/randlos/Extras)."""
     digits = "".join(ch for ch in (card.get("collector_number") or "") if ch.isdigit())
-    return bool(printed_size) and digits == (card.get("collector_number") or "") and digits and \
-        int(digits) <= printed_size
+    return bool(printed_size and digits and digits == (card.get("collector_number") or "")
+                and int(digits) <= printed_size)
 
 
 def _set_meta(h):
@@ -733,7 +831,7 @@ def r_sets(h, qs):
         printed = m.get("printed_size") or m.get("card_count") or 0
         total = m.get("card_count") or 0
         own = h.ctx.db.set_ownership(s["set_code"])
-        main_owned = sum(1 for cn in own if cn.isdigit() and printed and int(cn) <= printed)
+        main_owned = sum(1 for cn in own if cn and cn.isdigit() and printed and int(cn) <= printed)
         out.append({
             "code": s["set_code"], "name": m.get("name") or s["set_name"], "icon": m.get("icon_svg_uri"),
             "released": m.get("released_at"), "set_type": m.get("set_type"),
@@ -791,7 +889,10 @@ def r_set_detail(h, qs, code):
 def r_wish_bulk(h, qs):
     """Mehrere bestimmte Drucke auf die Wunschliste (z.B. fehlende Karten einer Edition)."""
     data = h.read_json()
-    ids = [i for i in data.get("scryfall_ids") or [] if i]
+    ids = data.get("scryfall_ids") or []
+    if not isinstance(ids, list):
+        raise ApiError(400, "scryfall_ids muss eine Liste sein")
+    ids = [str(i) for i in ids if i]
     if not ids:
         raise ApiError(400, "Keine Karten angegeben")
     fetched = h.ctx.scryfall.collection(ids)
@@ -846,7 +947,7 @@ def r_deck_proxies(h, qs, did):
     one = _first(qs, "copies", "") == "one"
     items = []
     for c in deck["cards"]:
-        if c["board"] not in ("commander", "main") or (c["basic"] and only_missing):
+        if c["board"] not in DECK_BOARDS or (c["basic"] and only_missing):
             continue
         n = c["missing"] if only_missing else c["quantity"]
         if n > 0:

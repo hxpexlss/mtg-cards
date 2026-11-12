@@ -256,25 +256,30 @@ class Scryfall:
         except (URLError, TimeoutError, OSError) as e:
             raise ScryfallError(f"Scryfall nicht erreichbar: {e}", 503) from None
 
-    def _get(self, path, params=None, cache=True):
+    def _get(self, path, params=None, cache=True, max_age=None):
+        """max_age (Sekunden): Cache-Einträge dürfen höchstens so alt sein – für Preise, die aktuell sein
+        müssen (0 = immer neu laden). Ohne Angabe gilt cache_ttl. Offline wird trotzdem der alte Stand genutzt."""
         url = path if path.startswith("http") else self.base + path
         if params:
             url += "?" + urlencode({k: v for k, v in params.items() if v not in (None, "")})
         now = time.time()
         stale = None
+        ttl = self.cache_ttl if max_age is None else min(self.cache_ttl, max_age)
         if cache:
             with self._cache_lock:
                 hit = self._cache.get(url)
-                if hit and now - hit[1] < self.cache_ttl:
+                if hit and now - hit[1] < ttl:
                     self._cache.move_to_end(url)
                     return hit[0]
+                if hit:
+                    stale = hit[0]
             if self.disk:
                 try:
                     data, ts = self.disk.get(url)
                 except Exception:  # noqa: BLE001
                     data, ts = None, None
                 if data is not None:
-                    if now - ts < self.cache_ttl:
+                    if now - ts < ttl:
                         with self._cache_lock:
                             self._cache[url] = (data, ts)
                         return data
@@ -303,20 +308,25 @@ class Scryfall:
         return out
 
     # -- Endpunkte --------------------------------------------------------
-    def by_id(self, scryfall_id):
-        return self._get(f"/cards/{quote(scryfall_id)}")
+    def by_id(self, scryfall_id, max_age=None):
+        return self._get(f"/cards/{quote(scryfall_id)}", max_age=max_age)
+
+    def fresh_card(self, scryfall_id):
+        """Karte ohne Cache neu laden (aktuelle Preise) – für „Aktualisieren“ an einer einzelnen Karte."""
+        return _tag(self.with_prices(self.by_id(scryfall_id, max_age=0), max_age=0), "id")
 
     def named(self, name, set_code=None):
         return self._get("/cards/named", {"fuzzy": name, "set": (set_code or "").lower() or None})
 
-    def by_set_number(self, set_code, number, lang=None):
+    def by_set_number(self, set_code, number, lang=None, max_age=None):
         path = f"/cards/{quote(set_code.lower())}/{quote(str(number))}"
         if lang and lang.lower() != "en":
             path += f"/{quote(lang.lower())}"
-        return self._get(path)
+        return self._get(path, max_age=max_age)
 
-    def search(self, q, unique="cards", order="name", page=1):
-        return self._get("/cards/search", {"q": q, "unique": unique, "order": order, "page": page})
+    def search(self, q, unique="cards", order="name", page=1, max_age=None):
+        return self._get("/cards/search", {"q": q, "unique": unique, "order": order, "page": page},
+                         max_age=max_age)
 
     # -- Editionen ----------------------------------------------------------
     def sets(self):
@@ -374,13 +384,13 @@ class Scryfall:
         prices = raw.get("prices") or {}
         return any(prices.get(k) for k in ("eur", "eur_foil", "usd", "usd_foil"))
 
-    def with_prices(self, raw):
+    def with_prices(self, raw, max_age=None):
         """Scryfall führt Preise nur beim englischen Druck. Fremdsprachige Karten bekommen die Preise
         des englischen Drucks mit gleichem Set + Sammlernummer."""
         if self._has_price(raw) or (raw.get("lang") or "en") == "en" or not raw.get("set"):
             return raw
         try:
-            en = self.by_set_number(raw["set"], raw["collector_number"])
+            en = self.by_set_number(raw["set"], raw["collector_number"], max_age=max_age)
         except (ScryfallError, KeyError):
             return raw
         return dict(raw, prices=en.get("prices") or {})
@@ -408,20 +418,33 @@ class Scryfall:
             return []
         return self._get("/cards/autocomplete", {"q": q}).get("data", [])
 
-    def prints(self, name, lang=None):
-        """Alle Drucke einer Karte (exakter Name), optional in einer Sprache (z.B. "de")."""
+    def prints(self, name, lang=None, max_age=None, max_pages=6):
+        """Alle Drucke einer Karte (exakter Name), optional in einer Sprache (z.B. "de").
+
+        Karten mit sehr vielen Drucken (Standardländer, Sol Ring …) verteilen sich bei Scryfall auf mehrere
+        Seiten – die werden mitgeladen, sonst fehlt z.B. der günstigste Druck. max_age: siehe _get().
+        """
         safe = name.replace('"', "")
         q = f'!"{safe}"'
         lang = (lang or "").lower()
         if lang and lang not in ("en", "auto"):
             q += " lang:any" if lang == "any" else f" lang:{lang}"
         try:
-            data = self.search(q, unique="prints", order="released")
+            data = self.search(q, unique="prints", order="released", max_age=max_age)
         except ScryfallError as e:
             if e.status == 404:
                 return []
             raise
-        return data.get("data", [])
+        cards = list(data.get("data") or [])
+        pages = 1
+        while data.get("has_more") and data.get("next_page") and pages < max_pages:
+            try:
+                data = self._get(data["next_page"], max_age=max_age)
+            except ScryfallError:
+                break       # erste Seiten sind besser als gar keine Drucke
+            cards += data.get("data") or []
+            pages += 1
+        return cards
 
     def collection_identifiers(self, identifiers):
         """Sammelabfrage mit beliebigen Identifiern (z.B. {"name": ...}).

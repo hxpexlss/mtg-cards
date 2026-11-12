@@ -30,6 +30,19 @@ CREATE INDEX IF NOT EXISTS ix_wishlist_oracle ON wishlist(oracle_id);
 """
 
 
+# Preise der Wunschliste dürfen höchstens so alt sein (Sekunden) – sonst käme der Preis-Alarm
+# wegen des mehrtägigen Scryfall-Caches zu spät.
+PRICE_MAX_AGE = 3600
+
+
+def _prints(scryfall, name):
+    """Alle Drucke mit möglichst aktuellen Preisen (ältere/eigene Scryfall-Clients kennen max_age nicht)."""
+    try:
+        return scryfall.prints(name, max_age=PRICE_MAX_AGE)
+    except TypeError:
+        return scryfall.prints(name)
+
+
 def _price(card, foil):
     vals = [card.get("price_eur_foil"), card.get("price_eur")] if foil else [card.get("price_eur"), card.get("price_eur_foil")]
     for v in vals:
@@ -200,7 +213,7 @@ class Wishlist:
                         price = _price(normalize_card(raw), r["foil"])
                 else:
                     best = None
-                    for raw in scryfall.prints(r["name"]):
+                    for raw in _prints(scryfall, r["name"]):
                         c = normalize_card(raw)
                         p = _price(c, r["foil"])
                         if p is not None and (best is None or p < best[0]):
@@ -225,7 +238,7 @@ class Wishlist:
 
     def cheapest_print(self, scryfall, name, foil=False):
         best = None
-        for raw in scryfall.prints(name):
+        for raw in _prints(scryfall, name):
             c = normalize_card(raw)
             p = _price(c, foil)
             if p is not None and (best is None or p < best[0]):
@@ -244,8 +257,10 @@ def export_wishlist(db):
         return [{k: r[k] for k in _EXPORT} for r in db.conn.execute("SELECT * FROM wishlist ORDER BY id")]
 
 
-def import_wishlist(db, items, replace=False):
-    Wishlist(db)
+def import_wishlist(db, items, replace=False, _in_tx=False):
+    """_in_tx=True: Teil einer laufenden Transaktion (kein eigenes Commit, Tabellen existieren bereits)."""
+    if not _in_tx:
+        Wishlist(db)
     count = 0
     with db._lock:
         if replace:
@@ -254,10 +269,20 @@ def import_wishlist(db, items, replace=False):
         for it in items or []:
             if not isinstance(it, dict) or not it.get("name") or it["name"].lower() in existing:
                 continue
+            it = dict(it)
+            try:
+                it["quantity"] = max(1, int(it.get("quantity") or 1))
+            except (TypeError, ValueError):
+                it["quantity"] = 1
+            it["foil"] = 1 if it.get("foil") else 0
+            it["notes"] = it.get("notes") or ""
+            it["color_identity"] = it.get("color_identity") or ""
             vals = [it.get(k) for k in _EXPORT]
             db.conn.execute(f"INSERT INTO wishlist({', '.join(_EXPORT)}, updated_at) VALUES({', '.join('?' * len(_EXPORT))}, ?)",
                             vals + [now_iso()])
+            existing.add(it["name"].lower())
             count += 1
         db._bump()
-        db.conn.commit()
+        if not _in_tx:
+            db.conn.commit()
     return count

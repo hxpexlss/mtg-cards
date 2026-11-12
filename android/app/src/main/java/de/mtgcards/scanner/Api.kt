@@ -20,11 +20,18 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     companion object {
         const val DEFAULT_PORT = 8765
+        /** So viele Einträge lädt die Suche höchstens auf einmal. */
+        const val SEARCH_LIMIT = 1000
         /** Fehlercode: Server nicht erreichbar (Netzwerk). */
         const val UNREACHABLE = 0
         const val NOT_CONFIGURED = -1
         /** HTTPS-Zertifikat unbekannt -> Fingerabdruck bestätigen lassen. */
         const val TLS_UNTRUSTED = -2
+        /** Antwort ist kein JSON (z.B. WLAN-Anmeldeseite oder ein anderer Dienst auf diesem Port). */
+        const val BAD_RESPONSE = -3
+
+        /** Eindeutige Kennung für eine Speicher-Anfrage: Der Server führt sie auch bei Wiederholung nur einmal aus. */
+        fun newRequestId(): String = java.util.UUID.randomUUID().toString()
 
         fun fromPrefs(ctx: Context): Api = Api(Prefs.serverUrl(ctx), Prefs.token(ctx), Prefs.fingerprint(ctx))
 
@@ -107,8 +114,15 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         }
     }
 
-    private suspend fun json(method: String, path: String, body: JSONObject? = null) =
-        JSONObject(request(method, path, body))
+    private suspend fun json(method: String, path: String, body: JSONObject? = null): JSONObject {
+        val text = request(method, path, body)
+        return try {
+            JSONObject(text)
+        } catch (e: org.json.JSONException) {
+            throw ApiException("Unerwartete Antwort – unter dieser Adresse antwortet kein MTG-Cards-Server " +
+                "(Adresse/Port prüfen, evtl. WLAN-Anmeldeseite)", BAD_RESPONSE)
+        }
+    }
 
     suspend fun health() = json("GET", "/api/health")
 
@@ -140,8 +154,9 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     }
 
     suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean, tags: List<String> = emptyList(),
-                        deckId: Long = 0L): JSONObject =
+                        deckId: Long = 0L, requestId: String = newRequestId()): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
+            put("request_id", requestId)
             put("scryfall_id", scryfallId)
             if (deckId > 0) put("deck_id", deckId)
             put("quantity", quantity)
@@ -151,8 +166,10 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     /** Hinzufügen per Name (+ optional Set/Nummer) – der Server schlägt bei Scryfall nach. */
     suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean,
-                          lang: String? = null, tags: List<String> = emptyList(), deckId: Long = 0L): JSONObject =
+                          lang: String? = null, tags: List<String> = emptyList(), deckId: Long = 0L,
+                          requestId: String = newRequestId()): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
+            put("request_id", requestId)
             put("name", name)
             if (deckId > 0) put("deck_id", deckId)
             if (tags.isNotEmpty()) put("tags", org.json.JSONArray(tags))
@@ -170,7 +187,7 @@ class Api(private val baseUrl: String, private val token: String, private val fi
             if (ci.isNotBlank()) add("ci=${enc(ci)}")
             if (tag.isNotBlank()) add("tag=${enc(tag)}")
             add("sort=$sort")
-            add("limit=1000")
+            add("limit=$SEARCH_LIMIT")
         }.joinToString("&")
         return json("GET", "/api/cards?$params")
     }
@@ -230,7 +247,8 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     suspend fun wishDelete(id: Long) = json("DELETE", "/api/wishlist/$id")
 
     /** Stapel-Scan: alle Karten auf einmal speichern. */
-    suspend fun addBatch(cards: org.json.JSONArray) = json("POST", "/api/cards/batch", JSONObject().put("cards", cards))
+    suspend fun addBatch(cards: org.json.JSONArray, requestId: String = newRequestId()) =
+        json("POST", "/api/cards/batch", JSONObject().put("cards", cards).put("request_id", requestId))
 
     suspend fun deck(id: Long) = json("GET", "/api/decks/$id")
 

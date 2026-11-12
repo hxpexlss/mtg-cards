@@ -145,7 +145,13 @@ def offline_io(args, db_path):
                 print(f"{len(db.all())} Einträge exportiert nach {args.export}", file=sys.stderr)
         if args.import_file:
             with open(args.import_file, encoding="utf-8-sig") as f:
-                res = import_cards(db, Scryfall(cache_path=cache_path_for(db_path)), f.read(), mode="replace" if args.replace else "add")
+                text = f.read()
+            try:
+                res = import_cards(db, Scryfall(cache_path=cache_path_for(db_path)), text,
+                                   mode="replace" if args.replace else "add")
+            except ValueError as e:
+                print(f"Import fehlgeschlagen: {e}", file=sys.stderr)
+                return 1
             print(f"{res['imported']} Karten importiert ({res['created']} neu, {res['merged']} zusammengeführt)")
             for err in res["errors"]:
                 print("  " + err, file=sys.stderr)

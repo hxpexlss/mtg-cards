@@ -100,7 +100,9 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
                 val items = (0 until arr.length()).map { arr.getJSONObject(it) }
                 adapter.submit(items)
                 val total = items.sumOf { it.optInt("quantity") }
+                val more = res.optInt("total") - items.size
                 count.text = "${res.optInt("total")} Einträge · $total Karten" +
+                    (if (more > 0) " · erste ${items.size} angezeigt – Suche eingrenzen" else "") +
                     (if (colors.isNotEmpty()) " · passt in ${colors.joinToString("")}" else "") +
                     (res.optJSONObject("duplicates")?.let { d ->
                         "\n${d.optInt("cards")} Karten doppelt · ${d.optInt("extra_copies")} überzählig · " +

@@ -3,6 +3,7 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const PAGE_SIZE = 1000;   // Karten pro Ladevorgang; mehr über „Weitere laden“
 const AUTO_TAGS = ["Commander", "Partner", "Companion", "Token", "Emblem", "Proxies"];   // immer in der Seitenleiste
 
 const state = {
@@ -28,13 +29,15 @@ function toast(msg, kind = "") {
 
 function manaHtml(cost) {
   if (!cost) return "";
-  return `<span class="mana">` + cost.replace(/\{([^}]+)\}/g, (_, s) => {
+  // erst escapen, dann Symbole einsetzen – Text außerhalb von {…} darf kein HTML einschleusen
+  return `<span class="mana">` + esc(cost).replace(/\{([^}]+)\}/g, (_, s) => {
     const cls = /^[WUBRG]$/.test(s) ? `ms-${s}` : (s.includes("/") ? "ms-hybrid" : "");
-    return `<span class="ms ${cls}" title="{${esc(s)}}">${esc(s.replace("/", ""))}</span>`;
+    return `<span class="ms ${cls}" title="{${s}}">${s.replace("/", "")}</span>`;
   }).replace(/ \/\/ /g, " / ") + `</span>`;
 }
 function ciHtml(ci) {
-  const colors = ci ? ci.split("") : ["C"];
+  const letters = String(ci || "").split("").filter((c) => "WUBRGC".includes(c));
+  const colors = letters.length ? letters : ["C"];
   return `<span class="mana">${colors.map((c) => `<span class="ms ms-${c}">${c}</span>`).join("")}</span>`;
 }
 function tagHtml(t, extra = "") {
@@ -95,14 +98,20 @@ function queryString() {
   if (state.foilOnly) p.set("foil", "1");
   if (state.dupMin > 1) p.set("dup_min", String(state.dupMin));
   p.set("sort", state.sort);
-  p.set("limit", "2000");
+  p.set("limit", String(PAGE_SIZE));
   return p.toString();
 }
 
 async function loadCards() {
   try {
-    const data = await api("/api/cards?" + queryString());
+    // nach einer Live-Aktualisierung so viele Karten laden wie vorher sichtbar (nachgeladene bleiben da)
+    const want = Math.max(PAGE_SIZE, Math.min(state.cards.length, 5000));
+    const key = queryString();
+    const data = await api("/api/cards?" + key.replace(/limit=\d+/, "limit=" + (state.listKey === key ? want : PAGE_SIZE)));
+    state.listKey = key;
     state.cards = data.cards;
+    state.total = data.total;
+    state.duplicates = data.duplicates;
     state.revision = data.revision;
     renderCards(data);
   } catch (e) {
@@ -114,7 +123,12 @@ async function loadCards() {
 function renderCards(data) {
   const box = $("#results");
   const total = data.cards.reduce((s, c) => s + c.quantity, 0);
-  $("#result-count").textContent = `${data.total} Einträge · ${total} Karten`;
+  const rest = Math.max(0, data.total - data.cards.length);
+  $("#result-count").textContent = rest
+    ? `${data.total} Einträge · ${data.cards.length} geladen (${total} Karten)`
+    : `${data.total} Einträge · ${total} Karten`;
+  $("#more").classList.toggle("hidden", !rest);
+  $("#btn-more").textContent = `Weitere ${Math.min(rest, PAGE_SIZE)} laden (noch ${rest})`;
   if (data.duplicates) {
     const d = data.duplicates;
     $("#result-count").textContent += ` · ${d.cards} Karten ab ${d.min}× · ${d.extra_copies} überzählige Exemplare`
@@ -165,6 +179,19 @@ function priceText(c, withEuro) {
 const LANG_NAMES = { en: "Englisch", de: "Deutsch", fr: "Französisch", it: "Italienisch", es: "Spanisch",
   pt: "Portugiesisch", ja: "Japanisch", ko: "Koreanisch", ru: "Russisch", zhs: "Chinesisch (vereinf.)",
   zht: "Chinesisch (trad.)" };
+
+/** Nächste Seite der Liste nachladen (große Sammlungen). */
+async function loadMore() {
+  const btn = $("#btn-more");
+  btn.disabled = true;
+  try {
+    const data = await api("/api/cards?" + queryString() + "&offset=" + state.cards.length);
+    state.cards = state.cards.concat(data.cards);
+    state.total = data.total;
+    renderCards({ cards: state.cards, total: data.total, duplicates: state.duplicates });
+  } catch (e) { toast(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
 
 async function loadSidebar() {
   try {
@@ -313,16 +340,23 @@ function renderDetail(c) {
 }
 
 // ---------------------------------------------------------------- Hinzufügen
-const add = { suggestions: [], sel: -1, lookupSeq: 0, preview: null };
+const add = { suggestions: [], sel: -1, lookupSeq: 0, printSeq: 0, preview: null };
+
+/** Vorschau und Druck-Auswahl verwerfen – sie gehören zum alten Namen. Laufende Abfragen werden ignoriert. */
+function resetAddPreview() {
+  add.preview = null;
+  add.lookupSeq++;
+  add.printSeq++;
+  $("#add-print").innerHTML = `<option value="">automatisch (neuester Druck)</option>`;
+  $("#add-preview").innerHTML = `<div class="placeholder">Vorschau</div>`;
+}
 
 function openAdd() {
   const dlg = $("#dlg-add");
   $("#add-name").value = "";
-  $("#add-print").innerHTML = `<option value="">automatisch (neuester Druck)</option>`;
   $("#add-qty").value = 1;
   $("#add-foil").checked = false;
-  $("#add-preview").innerHTML = `<div class="placeholder">Vorschau</div>`;
-  add.preview = null;
+  resetAddPreview();
   dlg.showModal();
   $("#add-name").focus();
 }
@@ -349,9 +383,11 @@ async function chooseName(name) {
 
 async function loadPrints(name) {
   const sel = $("#add-print");
+  const seq = ++add.printSeq;
   sel.innerHTML = `<option value="">automatisch (neuester Druck)</option>`;
   try {
     const { data } = await api("/api/prints?name=" + encodeURIComponent(name));
+    if (seq !== add.printSeq) return;     // Name wurde inzwischen geändert
     sel.innerHTML += data.map((p) =>
       `<option value="${esc(p.scryfall_id)}">${esc(p.set_name)} (${esc(p.set_code)}) #${esc(p.collector_number)} · ${esc(p.rarity)}${p.price_eur ? " · " + esc(p.price_eur) + " €" : ""}</option>`).join("");
   } catch (_) { /* egal */ }
@@ -386,9 +422,10 @@ async function previewLookup() {
 
 async function submitAdd(ev) {
   ev.preventDefault();
-  if (ev.submitter && ev.submitter.value === "cancel") return $("#dlg-add").close();
   const name = $("#add-name").value.trim();
-  const id = $("#add-print").value || (add.preview && add.preview.scryfall_id);
+  // Die Vorschau gilt nur für den Namen, der gerade im Feld steht (wird beim Tippen verworfen) –
+  // sonst würde die zuvor hinzugefügte Karte noch einmal gespeichert.
+  const id = $("#add-print").value || (add.preview && add.preview.scryfall_id) || "";
   if (!name && !id) return;
   const btn = $("#add-submit");
   btn.disabled = true;
@@ -397,7 +434,7 @@ async function submitAdd(ev) {
     if ($("#add-proxy").checked && !tags.includes("Proxies")) tags.push("Proxies");
     const c = await api("/api/cards", {
       method: "POST",
-      json: { name, scryfall_id: id || (add.preview && $("#add-lang").value ? add.preview.scryfall_id : undefined),
+      json: { name, scryfall_id: id || undefined,
         lang: $("#add-lang").value || undefined, quantity: +$("#add-qty").value || 1, foil: $("#add-foil").checked, tags },
     });
     toast(`${c.name}${c.proxy ? " (Proxy)" : ""} hinzugefügt (jetzt ${c.quantity}×)`, "ok");
@@ -405,7 +442,7 @@ async function submitAdd(ev) {
     loadCards();
     if ($("#add-keep").checked) {
       $("#add-name").value = "";
-      $("#add-print").innerHTML = `<option value="">automatisch (neuester Druck)</option>`;
+      resetAddPreview();
       $("#add-qty").value = 1;
       $("#add-name").focus();
     } else {
@@ -639,13 +676,14 @@ function bind() {
     state.view = b.dataset.view;
     store("mtg-view", state.view);
     $$(".viewtoggle button").forEach((x) => x.classList.toggle("active", x === b));
-    renderCards({ cards: state.cards, total: state.cards.length });
+    renderCards({ cards: state.cards, total: state.total ?? state.cards.length, duplicates: state.duplicates });
   });
   $("#results").onclick = (e) => {
     const el = e.target.closest("[data-id]");
     if (el) openCard(el.dataset.id);
   };
 
+  $("#btn-more").onclick = loadMore;
   $("#btn-add").onclick = openAdd;
   $("#btn-io").onclick = openIO;
   $("#btn-settings").onclick = openSettings;
@@ -665,7 +703,7 @@ function bind() {
   $$("dialog").forEach((d) => d.addEventListener("click", (e) => { if (e.target === d && d.id !== "dlg-login") d.close(); }));
 
   const name = $("#add-name");
-  name.addEventListener("input", () => { autocomplete(); });
+  name.addEventListener("input", () => { resetAddPreview(); autocomplete(); });
   name.addEventListener("keydown", (e) => {
     const list = $("#ac-list");
     const items = $$("li", list);

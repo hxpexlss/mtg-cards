@@ -90,10 +90,10 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 
     def connect(self):
         super().connect()
-        got = normalize_fp(fingerprint_der(self.sock.getpeercert(binary_form=True)))
-        if got != self._fingerprint:
+        got = fingerprint_der(self.sock.getpeercert(binary_form=True))
+        if normalize_fp(got) != self._fingerprint:
             self.sock.close()
-            raise ssl.SSLError(f"Zertifikats-Fingerabdruck stimmt nicht überein ({fingerprint_der(bytes.fromhex(got))})")
+            raise ssl.SSLError(f"Zertifikats-Fingerabdruck stimmt nicht überein (Server sendet {got})")
 
 
 class _PinnedHandler(urllib.request.HTTPSHandler):

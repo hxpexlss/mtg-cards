@@ -172,6 +172,7 @@ label.check { display: flex; align-items: center; gap: 6px; color: var(--text); 
 .ms-G { background: var(--G); color: #fff; }
 .ms-hybrid { background: linear-gradient(135deg, #aaa 50%, #777 50%); color: #fff; font-size: 8px; }
 
+.more { text-align: center; padding: 18px 0 6px; }
 .empty { text-align: center; padding: 80px 20px; color: var(--muted); }
 .empty h2 { color: var(--text); }
 

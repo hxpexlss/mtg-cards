@@ -37,7 +37,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.12.0_all.deb
+sudo apt install ./mtg-cards-desktop_2.0.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -52,7 +52,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.12.0_all.deb
+sudo apt install ./mtg-cards-server_2.0.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -61,7 +61,8 @@ sudo mtg-cards-server --show-token        # Token für App und Desktop
 - Weboberfläche im Browser: `http://<server>:8765`
 - Neuer Token: `sudo mtg-cards-server --new-token && sudo systemctl restart mtg-cards-server`
 - Backup per Kommandozeile: `sudo -u mtgcards mtg-cards-server --export /tmp/backup.json`
-  (Import: `--import datei.json`, mit `--replace` wird die Sammlung ersetzt)
+  (Import: `--import datei.json`, mit `--replace` wird die Sammlung ersetzt – aber nur, wenn die Datei
+  vollständig gelesen werden konnte; sonst bricht der Import ab und die Sammlung bleibt unverändert)
 - Firewall: `sudo ufw allow 8765/tcp` (und optional `47811/udp` für die automatische Suche im WLAN)
 
 ### Android
@@ -292,8 +293,8 @@ Header `Authorization: Bearer <TOKEN>`.
 | Methode | Pfad | |
 |---|---|---|
 | GET | `/api/cards?q=&ci=WU&ci_mode=within&tag=Commander&type=&sort=` | Suche |
-| POST | `/api/cards` `{name \| scryfall_id, set, cn, quantity, foil, tags}` | Hinzufügen (Anzahl wird bei gleichem Druck erhöht) |
-| POST | `/api/cards/batch` `{cards: [...]}` | Stapel speichern |
+| POST | `/api/cards` `{name \| scryfall_id, set, cn, quantity, foil, tags, request_id}` | Hinzufügen (Anzahl wird bei gleichem Druck erhöht). Mit `request_id` wird eine wiederholte Anfrage nur einmal ausgeführt |
+| POST | `/api/cards/batch` `{cards: [...], request_id}` | Stapel speichern |
 | GET/POST | `/api/wishlist` | Wunschliste / Wunsch hinzufügen (`{name, quantity, max_price_eur}`) |
 | PATCH/DELETE | `/api/wishlist/{id}` | Wunsch ändern / entfernen |
 | GET/PATCH/DELETE | `/api/cards/{id}` | Einzelne Karte |
