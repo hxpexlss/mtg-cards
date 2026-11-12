@@ -3,7 +3,7 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const AUTO_TAGS = ["Commander", "Partner", "Companion", "Proxies"];   // immer in der Seitenleiste
+const AUTO_TAGS = ["Commander", "Partner", "Companion", "Token", "Proxies"];   // immer in der Seitenleiste
 
 const state = {
   token: "",

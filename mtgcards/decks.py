@@ -6,7 +6,9 @@ import re
 from .db import now_iso
 from .scryfall import ScryfallError, normalize_card
 
-BOARDS = ("commander", "main", "side", "maybe")
+BOARDS = ("commander", "companion", "main", "side", "maybe")
+DECK_BOARDS = ("commander", "companion", "main")    # zählen zum Deck (Bestand, Fehlende, Reservierung)
+_PARTNER_KW = {"partner", "partner with", "friends forever", "choose a background", "doctor's companion"}
 STATUSES = ("owned", "build")   # Besitz = Deck ist gebaut/vorhanden, Bau = Deck wird zusammengestellt
 
 
@@ -42,7 +44,7 @@ CREATE INDEX IF NOT EXISTS ix_deck_cards_deck ON deck_cards(deck_id);
 
 _HEADERS = {
     "commander": "commander", "commanders": "commander", "kommandeur": "commander",
-    "companion": "side", "deck": "main", "main": "main", "mainboard": "main", "maindeck": "main",
+    "companion": "companion", "begleiter": "companion", "deck": "main", "main": "main", "mainboard": "main", "maindeck": "main",
     "sideboard": "side", "side": "side", "maybeboard": "maybe", "maybe": "maybe", "considering": "maybe",
 }
 _LINE = re.compile(
@@ -86,6 +88,31 @@ def parse_decklist(text):
     return out
 
 
+def _kw(card):
+    return {str(k).lower() for k in card.get("keywords") or []}
+
+
+def _role_warning(card, commanders):
+    """Hinweis, wenn eine Karte ihre Rolle (Commander/Partner/Companion) eigentlich nicht erfüllen kann."""
+    front = (card.get("type_line") or "").split("//")[0]
+    if card["board"] == "commander":
+        legendary = "Legendary" in front and ("Creature" in front or "Planeswalker" in front)
+        background = "Background" in front
+        if not (legendary or background):
+            return "Kein legendäres Wesen – darf normalerweise nicht Commander sein"
+        if len(commanders) > 2:
+            return "Mehr als zwei Commander"
+        if len(commanders) == 2:
+            others = [o for o in commanders if o is not card]
+            pair_ok = bool(_kw(card) & _PARTNER_KW) or background or any(
+                "Background" in (o.get("type_line") or "") for o in others)
+            if not pair_ok:
+                return "Zwei Commander, aber diese Karte hat keine Partner-Fähigkeit"
+    if card["board"] == "companion" and "companion" not in _kw(card):
+        return "Karte hat keine Companion-Fähigkeit"
+    return None
+
+
 class DeckStore:
     def __init__(self, db):
         self.db = db
@@ -115,7 +142,7 @@ class DeckStore:
         rows = self.db.conn.execute(
             """SELECT dc.deck_id, d.name, dc.oracle_id, dc.name, SUM(dc.quantity)
                FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id
-               WHERE dc.board IN ('commander', 'main')
+               WHERE dc.board IN ('commander', 'companion', 'main')
                GROUP BY dc.deck_id, dc.oracle_id, dc.name""")
         for deck_id, deck_name, oid, name, qty in rows:
             entry = {"deck_id": deck_id, "deck": deck_name, "quantity": qty}
@@ -217,14 +244,15 @@ class DeckStore:
             used_elsewhere = sum(u["quantity"] for u in c["other_decks"])
             c["available"] = max(0, owned - used_elsewhere)   # frei, wenn alle anderen Decks bestückt sind
             # Reicht der Bestand nur, wenn die Karte aus einem anderen Deck genommen wird?
-            c["shared"] = (not c["basic"] and c["missing"] == 0 and c["board"] in ("commander", "main")
+            c["shared"] = (not c["basic"] and c["missing"] == 0 and c["board"] in DECK_BOARDS
                            and owned < c["quantity"] + used_elsewhere)
             c["missing_reserved"] = 0 if c["basic"] else max(0, c["quantity"] - c["available"])
             c["outside_identity"] = bool(commanders) and c["board"] != "commander" and \
                 not set(c["color_identity"] or "") <= identity
-            c["group"] = "Commander" if c["board"] == "commander" else next(
+            c["group"] = {"commander": "Commander", "companion": "Companion"}.get(c["board"]) or next(
                 (t for t in _TYPE_ORDER if t in (c["type_line"] or "")), "Sonstige")
-            if c["board"] in ("commander", "main"):
+            c["warning"] = _role_warning(c, commanders)
+            if c["board"] in DECK_BOARDS:
                 stats["cards"] += c["quantity"]
                 stats["missing"] += c["missing"]
                 stats["owned"] += c["quantity"] - c["missing"]
@@ -234,6 +262,8 @@ class DeckStore:
                 stats["missing_reserved"] += c["missing_reserved"]
         deck["cards"] = cards
         deck["commanders"] = [c["name"] for c in commanders]
+        deck["companions"] = [c["name"] for c in cards if c["board"] == "companion"]
+        stats["role_warnings"] = sum(1 for c in cards if c["warning"])
         deck["color_identity"] = "".join(x for x in "WUBRG" if x in identity)
         deck["stats"] = stats
         return deck
@@ -342,7 +372,8 @@ class DeckStore:
         if deck is None:
             return None
         lines = []
-        for board, title in (("commander", "Commander"), ("main", "Deck"), ("side", "Sideboard"),
+        for board, title in (("commander", "Commander"), ("companion", "Companion"), ("main", "Deck"),
+                             ("side", "Sideboard"),
                              ("maybe", "Maybeboard")):
             cards = [c for c in deck["cards"] if c["board"] == board]
             if only_missing:

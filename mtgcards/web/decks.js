@@ -4,7 +4,8 @@
 const decks = { current: null, list: [], formMode: "new", filter: "all" };
 const STATUS_LABEL = { owned: "Besitz", build: "Bau" };
 const BOARD_TITLES = { side: "Sideboard", maybe: "Vielleicht" };
-const GROUP_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact",
+const PARTNER_KW = ["partner", "partner with", "friends forever", "choose a background", "doctor's companion"];
+const GROUP_ORDER = ["Commander", "Companion", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact",
   "Enchantment", "Land", "Sonstige", "Sideboard", "Vielleicht"];
 const GROUP_TITLES = { Creature: "Kreaturen", Planeswalker: "Planeswalker", Battle: "Schlachten", Instant: "Spontanzauber",
   Sorcery: "Hexereien", Artifact: "Artefakte", Enchantment: "Verzauberungen", Land: "Länder" };
@@ -92,6 +93,10 @@ function renderDeck(d) {
       <button class="btn small" data-dact="rename">Umbenennen</button>
       <button class="btn small danger" data-dact="delete">Löschen</button>
     </div>
+    ${d.commanders.length || (d.companions || []).length ? `<div class="deck-roles">
+      ${d.commanders.length ? `${d.commanders.length > 1 ? "Commander (Partner)" : "Commander"}: <b>${d.commanders.map(esc).join(" & ")}</b>` : ""}
+      ${(d.companions || []).length ? ` · Companion: <b>${d.companions.map(esc).join(", ")}</b>` : ""}
+    </div>` : `<p class="deck-roles">Noch kein Commander – bei einer Karte auf ★ klicken.</p>`}
     <div class="deck-stats">
       <div class="stat"><b>${st.cards}</b>Karten</div>
       <div class="stat good"><b>${st.owned}</b>vorhanden</div>
@@ -105,7 +110,7 @@ function renderDeck(d) {
       <div class="ac-wrap"><input id="deck-add-name" list="deck-ac" placeholder="Karte hinzufügen (Name) …" autocomplete="off">
         <datalist id="deck-ac"></datalist></div>
       <select id="deck-add-board" style="width:auto">
-        <option value="main">Deck</option><option value="commander">Commander</option>
+        <option value="main">Deck</option><option value="commander">Commander</option><option value="companion">Companion</option>
         <option value="side">Sideboard</option><option value="maybe">Vielleicht</option></select>
       <button class="btn primary" data-dact="add">＋</button>
     </div>
@@ -142,11 +147,14 @@ function deckCardHtml(c) {
     <span class="st" title="${esc(tip)}">${status}</span>
     <span class="n" data-img="${esc(c.image_url || "")}" title="${esc(tip)}">${esc(c.name)}${c.missing && c.owned ? ` <span class="small">(${c.owned}/${c.quantity})</span>` : ""}</span>
     ${c.outside_identity ? `<span class="warn" title="Außerhalb der Farbidentität des Commanders">⚠</span>` : ""}
+    ${c.warning ? `<span class="rolewarn" title="${esc(c.warning)}">⚠ Rolle</span>` : ""}
+    ${c.board === "commander" && (c.keywords || []).some((k) => PARTNER_KW.includes(String(k).toLowerCase())) ? `<span class="pill role">Partner</span>` : ""}
     ${c.proxies ? `<span class="pill proxy" title="${c.proxies} Proxy in der Sammlung">🅿 ${c.proxies}</span>` : ""}
     ${manaHtml(c.mana_cost)}
     <span class="acts">
       <button data-op="inc" title="+1">＋</button><button data-op="dec" title="−1">−</button>
-      <button data-op="cmd" title="${c.board === "commander" ? "Kein Commander mehr" : "Als Commander"}">★</button>
+      <button data-op="cmd" title="${c.board === "commander" ? "Kein Commander mehr" : "Als Commander (auch Partner)"}">★</button>
+      <button data-op="comp" title="${c.board === "companion" ? "Kein Companion mehr" : "Als Companion"}">🅲</button>
       <button data-op="side" title="${c.board === "side" ? "Ins Deck" : "Ins Sideboard"}">⇄</button>
       <button data-op="del" title="Entfernen">✕</button>
     </span></div>`;
@@ -159,6 +167,7 @@ async function deckCardOp(id, op) {
   if (op === "inc") req = { method: "PATCH", json: { quantity: c.quantity + 1 } };
   if (op === "dec") req = { method: "PATCH", json: { quantity: c.quantity - 1 } };
   if (op === "cmd") req = { method: "PATCH", json: { board: c.board === "commander" ? "main" : "commander" } };
+  if (op === "comp") req = { method: "PATCH", json: { board: c.board === "companion" ? "side" : "companion" } };
   if (op === "side") req = { method: "PATCH", json: { board: c.board === "side" ? "main" : "side" } };
   if (op === "del") req = { method: "DELETE" };
   try {

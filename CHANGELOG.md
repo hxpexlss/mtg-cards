@@ -4,6 +4,19 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [1.10.0] – 2026-11-12
+
+### Neu
+- **Commander, Partner und Companion im Deck festlegen:** Karte als Commander markieren (★, zwei Commander für
+  Partner/Background möglich) oder als **Companion** (🅲, eigener Bereich). Am PC über die Knöpfe an der Karte bzw.
+  beim Hinzufügen, in der App per Antippen einer Karte im Deck.
+- Deck-Kopf zeigt „Commander (Partner): … · Companion: …“.
+- **Hinweise ⚠** bei Rollen, die nicht passen: Commander ist kein legendäres Wesen, zwei Commander ohne
+  Partner-Fähigkeit, Companion ohne Companion-Fähigkeit.
+- Companion wird gegen die Farbidentität geprüft und zählt bei Bestand/Fehlenden mit; Abschnitt „Companion“ in
+  Decklisten wird erkannt und exportiert.
+- **Tag „Token“** für Spielsteine (automatisch, auch für bereits vorhandene Karten) mit Filter in Sammlung und App.
+
 ## [1.9.0] – 2026-11-12
 
 ### Neu
