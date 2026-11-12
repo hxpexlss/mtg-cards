@@ -35,7 +35,7 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         info = view.findViewById(R.id.wishInfo)
-        adapter = WishAdapter(viewLifecycleOwner.lifecycleScope) { editWish(it) }
+        adapter = WishAdapter(viewLifecycleOwner.lifecycleScope) { showWish(it) }
         view.findViewById<RecyclerView>(R.id.wishList).apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = this@WishlistFragment.adapter
@@ -108,6 +108,76 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             }
             .setNegativeButton("Abbrechen", null)
             .show()
+    }
+
+    /** Kartenansicht: großes Bild, Regeltext, Preise; von hier aus bearbeiten/entfernen. */
+    private fun showWish(w: JSONObject) {
+        val ctx = requireContext()
+        val dp = resources.displayMetrics.density
+        val image = ImageView(ctx).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (380 * dp).toInt())
+        }
+        val info = TextView(ctx).apply {
+            textSize = 15f
+            setPadding(0, (10 * dp).toInt(), 0, 0)
+            setTextIsSelectable(true)
+        }
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((20 * dp).toInt(), (12 * dp).toInt(), (20 * dp).toInt(), 0)
+            addView(image)
+            addView(info)
+        }
+        fun price(key: String) = if (w.isNull(key)) "–" else euro(w.optDouble(key))
+        fun render(card: JSONObject?) {
+            info.text = buildString {
+                val type = card?.optString("type_line") ?: w.optString("type_line")
+                val mana = card?.optString("mana_cost") ?: w.optString("mana_cost")
+                append("$mana  $type".trim()).append("\n\n")
+                card?.optString("oracle_text")?.takeIf { it.isNotBlank() }?.let { append(it).append("\n\n") }
+                append("Aktuell: ${price("price_eur")}")
+                if (w.optBoolean("any_print") && w.optString("price_set").isNotBlank()) append(" (günstigster Druck: ${w.optString("price_set")})")
+                append("\nZielpreis: ${if (w.isNull("max_price_eur")) "keiner" else price("max_price_eur")}")
+                if (w.optBoolean("target_reached")) append("  ✓ erreicht")
+                append("\nGewünscht: ${w.optInt("quantity")}×")
+                if (w.optInt("owned") > 0) append(" · ${w.optInt("owned")} bereits in der Sammlung")
+                append("\nDruck: ${if (w.optBoolean("any_print")) "beliebig" else "${w.optString("set_code")} #${w.optString("collector_number")}"}")
+                if (w.optString("notes").isNotBlank()) append("\nNotiz: ${w.optString("notes")}")
+            }
+        }
+        render(null)
+        ImageLoader.load(viewLifecycleOwner.lifecycleScope, w.optString("image_url"), image)
+        AlertDialog.Builder(ctx)
+            .setTitle(w.optString("name") + if (w.optBoolean("foil")) " ✦" else "")
+            .setView(android.widget.ScrollView(ctx).apply { addView(box) })
+            .setPositiveButton("Bearbeiten") { _, _ -> editWish(w) }
+            .setNeutralButton("Entfernen") { _, _ -> deleteWish(w) }
+            .setNegativeButton("Schließen", null)
+            .show()
+        // Regeltext nachladen (aus dem Scryfall-Cache des Servers)
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val card = Api.fromPrefs(ctx).lookup(
+                    if (w.optBoolean("any_print")) w.optString("name") else null,
+                    scryfallId = if (w.optBoolean("any_print")) null else w.optString("scryfall_id"))
+                render(card)
+                if (w.optString("image_url").isBlank()) {
+                    ImageLoader.load(viewLifecycleOwner.lifecycleScope, card.optString("image_url"), image)
+                }
+            } catch (_: ApiException) {
+            }
+        }
+    }
+
+    private fun deleteWish(w: JSONObject) {
+        val ctx = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try { Api.fromPrefs(ctx).wishDelete(w.optLong("id")); load() } catch (e: ApiException) {
+                Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun editWish(w: JSONObject) {

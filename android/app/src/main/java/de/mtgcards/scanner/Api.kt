@@ -92,8 +92,10 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     }
 
     suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null,
-                       alternatives: List<String> = emptyList(), lang: String? = null): JSONObject {
+                       alternatives: List<String> = emptyList(), lang: String? = null,
+                       scryfallId: String? = null): JSONObject {
         val q = buildList {
+            if (!scryfallId.isNullOrBlank()) add("id=${enc(scryfallId)}")
             if (!lang.isNullOrBlank()) add("lang=${enc(lang)}")
             if (!name.isNullOrBlank()) add("name=${enc(name)}")
             alternatives.forEach { add("alt=${enc(it)}") }

@@ -273,7 +273,9 @@ dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(3px); }
 .wish-add input { width: auto; }
 .wish-table td { vertical-align: middle; }
 .wish-table tr.reached td { background: color-mix(in srgb, var(--ok) 10%, transparent); }
-.thumb { width: 36px; border-radius: 4px; display: block; }
+.thumb { width: 36px; border-radius: 4px; display: block; cursor: zoom-in; }
+.wish-name { cursor: pointer; }
+.wish-name:hover { text-decoration: underline; }
 .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .badge-n { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--ok);

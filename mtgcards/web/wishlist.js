@@ -45,8 +45,8 @@ function renderWishlist(r) {
       <th><input type="checkbox" id="wish-all" title="Alle auswählen"></th><th></th><th>Karte</th><th>Anzahl</th><th>Zielpreis</th><th>Aktuell</th><th>Status</th><th></th></tr></thead><tbody>
       ${r.items.map((w) => `<tr data-wid="${w.id}" class="${w.target_reached ? "reached" : ""}">
         <td><input type="checkbox" class="wish-sel" title="Für Proxies auswählen"></td>
-        <td>${w.image_url ? `<img class="thumb" src="${esc(w.image_url)}" alt="" data-img="${esc(w.image_url)}">` : ""}</td>
-        <td><b>${esc(w.name)}</b>${w.foil ? " ✦" : ""}
+        <td>${w.image_url ? `<img class="thumb" src="${esc(w.image_url)}" alt="" data-img="${esc(w.image_url)}" data-wview="1">` : ""}</td>
+        <td><b class="wish-name" data-wview="1">${esc(w.name)}</b>${w.foil ? " ✦" : ""}
           <div class="muted small">${w.any_print ? "beliebiger Druck" : esc(w.set_code + " #" + w.collector_number)}${w.notes ? " · " + esc(w.notes) : ""}${w.owned ? ` · ${w.owned} bereits in der Sammlung` : ""}</div></td>
         <td><span class="qty"><button class="btn small" data-wop="dec">−</button><b>${w.quantity}</b><button class="btn small" data-wop="inc">＋</button></span></td>
         <td><input class="wish-target" value="${w.max_price_eur == null ? "" : String(w.max_price_eur).replace(".", ",")}" placeholder="–" style="width:90px"> €</td>
@@ -76,6 +76,47 @@ const wishAutocomplete = debounce(async (q) => {
   } catch (_) { /* egal */ }
 }, 200);
 
+/** Kartenansicht für einen Wunsch: großes Bild, Regeltext, Preise. */
+async function showWishCard(id) {
+  const w = wish.items.find((x) => x.id === id);
+  if (!w) return;
+  let dlg = $("#dlg-wish");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "dlg-wish";
+    dlg.className = "modal wide";
+    document.body.appendChild(dlg);
+    dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); });
+  }
+  const render = (c) => {
+    const text = c && c.oracle_text ? `<div class="oracle">${oracleHtml(c.oracle_text)}</div>` : "";
+    dlg.innerHTML = `<div class="modal-body">
+      <header><h2>${esc(w.name)}${w.foil ? " ✦" : ""} ${manaHtml((c && c.mana_cost) || w.mana_cost)}</h2><button class="x" data-close>×</button></header>
+      <div class="card-detail">
+        <div>${(w.image_url || (c && c.image_url)) ? `<img src="${esc(w.image_url || c.image_url)}" alt="">` : ""}</div>
+        <div>
+          <div class="typeline">${esc((c && c.type_line) || w.type_line || "")}</div>
+          ${text}
+          <dl class="kv">
+            <dt>Aktueller Preis</dt><dd>${esc(fmtEur(w.price_eur))}${w.any_print && w.price_set ? ` <span class="muted">(günstigster Druck: ${esc(w.price_set)})</span>` : ""}</dd>
+            <dt>Zielpreis</dt><dd>${w.max_price_eur == null ? "–" : esc(fmtEur(w.max_price_eur))} ${w.target_reached ? `<span class="pill ok">✓ erreicht</span>` : ""}</dd>
+            <dt>Gewünscht</dt><dd>${w.quantity}×${w.owned ? ` · ${w.owned} bereits in der Sammlung` : ""}</dd>
+            <dt>Druck</dt><dd>${w.any_print ? "beliebig (günstigster)" : esc(w.set_code + " #" + w.collector_number)}</dd>
+            ${c && c.color_identity !== undefined ? `<dt>Farbidentität</dt><dd>${ciHtml(c.color_identity)}</dd>` : ""}
+            ${w.notes ? `<dt>Notiz</dt><dd>${esc(w.notes)}</dd>` : ""}
+          </dl>
+          ${c && c.scryfall_uri ? `<a class="btn" href="${esc(c.scryfall_uri)}" target="_blank" rel="noopener">Auf Scryfall öffnen ↗</a>` : ""}
+        </div>
+      </div></div>`;
+  };
+  render(null);
+  if (!dlg.open) dlg.showModal();
+  try {
+    const q = w.any_print ? "name=" + encodeURIComponent(w.name) : "id=" + encodeURIComponent(w.scryfall_id);
+    render(await api("/api/lookup?" + q));
+  } catch (_) { /* ohne Regeltext anzeigen */ }
+}
+
 function bindWishlist() {
   const box = $("#wish-main");
   box.addEventListener("submit", async (e) => {
@@ -93,6 +134,7 @@ function bindWishlist() {
     } catch (err) { toast(err.message, "err"); btn.disabled = false; }
   });
   box.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-wview]")) return showWishCard(+e.target.closest("[data-wid]").dataset.wid);
     const op = e.target.closest("[data-wop]");
     if (op) return wishOp(op.closest("[data-wid]").dataset.wid, op.dataset.wop);
     const a = e.target.closest("[data-wact]");
@@ -127,6 +169,19 @@ function bindWishlist() {
     } catch (err) { toast(err.message, "err"); }
   });
   box.addEventListener("input", (e) => { if (e.target.id === "wish-name") wishAutocomplete(e.target.value.trim()); });
+  // Kartenbild beim Überfahren groß anzeigen
+  const pv = document.createElement("img");
+  pv.style.cssText = "position:fixed;width:240px;border-radius:12px;pointer-events:none;z-index:50;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5)";
+  document.body.appendChild(pv);
+  box.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[data-img]");
+    if (t && t.dataset.img) { pv.src = t.dataset.img; pv.style.display = "block"; }
+  });
+  box.addEventListener("mouseout", (e) => { if (e.target.closest("[data-img]")) pv.style.display = "none"; });
+  box.addEventListener("mousemove", (e) => {
+    pv.style.left = Math.min(e.clientX + 24, innerWidth - 260) + "px";
+    pv.style.top = Math.max(10, Math.min(e.clientY - 120, innerHeight - 350)) + "px";
+  });
   refreshWishBadge();
 }
 
