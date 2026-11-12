@@ -3,7 +3,7 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const AUTO_TAGS = ["Commander", "Partner", "Companion", "Token", "Proxies"];   // immer in der Seitenleiste
+const AUTO_TAGS = ["Commander", "Partner", "Companion", "Token", "Emblem", "Proxies"];   // immer in der Seitenleiste
 
 const state = {
   token: "",
@@ -149,10 +149,22 @@ function renderCards(data) {
         <td>${ciHtml(c.color_identity)}</td>
         <td>${esc(c.set_code)} #${esc(c.collector_number)}</td>
         <td><div class="tags">${c.tags.map((t) => tagHtml(t)).join("")}</div></td>
-        <td>${esc((c.foil ? c.price_eur_foil : c.price_eur) || "")}</td>
+        <td>${esc(priceText(c))}</td>
       </tr>`).join("")}</tbody></table>`;
   }
 }
+
+/** Preis einer Karte als Text: Euro, sonst Dollar (Scryfall hat nicht für jeden Druck einen Euro-Preis). */
+function priceText(c, withEuro) {
+  const eur = c.foil ? (c.price_eur_foil || c.price_eur) : (c.price_eur || c.price_eur_foil);
+  if (eur) return withEuro ? `${eur} €` : String(eur);
+  const usd = c.foil ? (c.price_usd_foil || c.price_usd) : (c.price_usd || c.price_usd_foil);
+  return usd ? `$${usd}` : "";
+}
+
+const LANG_NAMES = { en: "Englisch", de: "Deutsch", fr: "Französisch", it: "Italienisch", es: "Spanisch",
+  pt: "Portugiesisch", ja: "Japanisch", ko: "Koreanisch", ru: "Russisch", zhs: "Chinesisch (vereinf.)",
+  zht: "Chinesisch (trad.)" };
 
 async function loadSidebar() {
   try {
@@ -181,7 +193,9 @@ async function openCard(id) {
 function renderDetail(c) {
   $("#cd-title").innerHTML = `${esc(c.name)} ${manaHtml(c.mana_cost)}`;
   const pt = c.power != null ? `${c.power}/${c.toughness}` : (c.loyalty ? `Loyalität ${c.loyalty}` : "");
-  const price = c.foil ? (c.price_eur_foil || c.price_usd_foil && `$${c.price_usd_foil}`) : (c.price_eur || c.price_usd && `$${c.price_usd}`);
+  const price = priceText(c, true);
+  const rel = c.related || [];
+  const relLabel = rel.length && rel[0].kind === "emblem" ? "Emblem vorhanden" : "Gehört zu";
   $("#cd-body").innerHTML = `
     <div>${c.image_url ? `<img src="${esc(c.image_url)}" alt="">` : ""}</div>
     <div>
@@ -195,8 +209,16 @@ function renderDetail(c) {
         <dt>Foil</dt><dd><label class="check" style="margin:0"><input type="checkbox" data-act="foil" ${c.foil ? "checked" : ""}> Foil</label></dd>
         <dt>Farbidentität</dt><dd>${ciHtml(c.color_identity)}</dd>
         <dt>Schlüsselwörter</dt><dd>${esc(c.keywords.join(", ")) || "–"}</dd>
-        <dt>Edition</dt><dd>${esc(c.set_name)} (${esc(c.set_code)}) #${esc(c.collector_number)} · ${esc(c.rarity)}</dd>
-        <dt>Preis</dt><dd>${price ? esc(String(price).startsWith("$") ? price : price + " €") : "–"}</dd>
+        <dt>Edition</dt><dd>${esc(c.set_name)} (${esc(c.set_code)}) #${esc(c.collector_number)} · ${esc(c.rarity)}
+          · ${esc(LANG_NAMES[c.lang] || c.lang)} <button class="btn small" data-act="print" title="Andere Edition oder Sprache wählen">Druck ändern</button>
+          <div id="cd-prints" class="hidden" style="margin-top:6px">
+            <select id="cd-print-lang" style="width:auto"><option value="">Englisch</option>
+              ${Object.entries(LANG_NAMES).filter(([k]) => k !== "en").map(([k, v]) => `<option value="${k}" ${k === c.lang ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
+            <select id="cd-print-sel" style="max-width:340px"><option value="">Lade …</option></select>
+            <button class="btn small primary" data-act="printok">Übernehmen</button>
+          </div></dd>
+        <dt>Preis</dt><dd>${price ? esc(price) : "–"}</dd>
+        ${rel.length ? `<dt>${relLabel}</dt><dd>${rel.map((r) => `<a href="#" data-open="${r.id}">${esc(r.name)}</a> <span class="muted small">(${esc(r.set_code)}${r.quantity > 1 ? `, ${r.quantity}×` : ""})</span>`).join(", ")}</dd>` : ""}
         <dt>Tags</dt><dd><div class="tag-edit">
           ${c.tags.map((t) => `<span class="tag t-${esc(t.replace(/\W/g, ""))}">${esc(t)} <span class="rm" data-rm="${esc(t)}">×</span></span>`).join("")}
           <input placeholder="Tag hinzufügen ↵" data-act="addtag"></div></dd>
@@ -226,9 +248,32 @@ function renderDetail(c) {
       loadCards();
     } catch (e) { toast(e.message, "err"); }
   };
+  const loadPrintChoices = async () => {
+    const sel = $("#cd-print-sel");
+    sel.innerHTML = `<option value="">Lade …</option>`;
+    const lang = $("#cd-print-lang").value;
+    try {
+      const { data } = await api(`/api/prints?name=${encodeURIComponent(c.name)}${lang ? "&lang=" + lang : ""}`);
+      sel.innerHTML = data.length ? data.slice().reverse().map((p) => `<option value="${esc(p.scryfall_id)}" ${p.scryfall_id === c.scryfall_id ? "selected" : ""}>
+        ${esc(p.set_name)} (${esc(p.set_code)}) #${esc(p.collector_number)}${p.released_at ? " · " + esc(p.released_at.slice(0, 4)) : ""}${p.artist ? " · " + esc(p.artist) : ""}${p.price_eur ? " · " + esc(p.price_eur) + " €" : ""}</option>`).join("")
+        : `<option value="">Keine Drucke in dieser Sprache</option>`;
+    } catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
+  };
+  $("#cd-print-lang").onchange = loadPrintChoices;
   body.onclick = async (ev) => {
     const act = ev.target.dataset.act;
     const rm = ev.target.dataset.rm;
+    if (ev.target.dataset.open) { ev.preventDefault(); return openCard(ev.target.dataset.open); }
+    if (act === "print") {
+      $("#cd-prints").classList.toggle("hidden");
+      if (!$("#cd-prints").classList.contains("hidden")) loadPrintChoices();
+      return;
+    }
+    if (act === "printok") {
+      const id = $("#cd-print-sel").value;
+      if (!id || id === c.scryfall_id) return;
+      return patch({ scryfall_id: id });
+    }
     if (rm) return patch({ tags: c.tags.filter((t) => t !== rm) });
     if (act === "inc") return patch({ quantity: c.quantity + 1 });
     if (act === "dec") {

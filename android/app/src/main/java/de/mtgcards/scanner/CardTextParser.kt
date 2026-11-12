@@ -12,7 +12,12 @@ data class Region(val left: Float, val top: Float, val right: Float, val bottom:
     fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
 }
 
-data class CodeResult(val setCode: String?, val collectorNumber: String?, val lang: String?, val raw: String = "")
+data class CodeResult(val setCode: String?, val collectorNumber: String?, val lang: String?, val raw: String = "",
+                      /** Kartenanzahl der Edition aus "123/249" (alte Rahmen 2003–2014). */
+                      val total: String? = null)
+
+/** Hinweise vom unteren Rand alter Karten: Künstler ("Illus. …") und Jahr ("© 1995 Wizards …"). */
+data class OldCardHints(val artist: String?, val year: String?)
 
 data class ScanResult(
     val name: String?,
@@ -22,6 +27,10 @@ data class ScanResult(
     val alternatives: List<String> = emptyList(),
     /** Sprachcode vom Kartenrand (z.B. "DMU • DE" -> "de"), falls lesbar. */
     val lang: String? = null,
+    /** Alte Karten: Kartenanzahl der Edition ("123/249"), Künstler und Copyright-Jahr. */
+    val total: String? = null,
+    val artist: String? = null,
+    val year: String? = null,
 )
 
 /**
@@ -30,7 +39,9 @@ data class ScanResult(
  *  - Set-Code + Sammlernummer: unten links (z.B. "123/280 R" und "DMU • EN"), best effort
  */
 object CardTextParser {
-    private val CN_SLASH = Regex("""\b0*(\d{1,4}[a-z]?)\s*/\s*\d{1,4}\b""")
+    private val CN_SLASH = Regex("""\b0*(\d{1,4}[a-z]?)\s*/\s*0*(\d{1,4})\b""")
+    private val ILLUS = Regex("""(?i)\billus(?:trated)?\.?\s*(?:by\s+)?(?:[©@]\s*\d{4}\s*)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ.'\- &]{2,40})""")
+    private val YEAR = Regex("""(?:[©@]|\([cC]\)|\bC)\s*(?:(?:19|20)\d{2}\s*[-–]\s*)?((?:199|20[0-3])\d)\b""")
     private val CN_RARITY_BEFORE = Regex("""(?:^|\s)[CURMSLTP]\s+0*(\d{1,4}[a-z]?)\b""")
     private val CN_RARITY_AFTER = Regex("""(?:^|\s)0*(\d{1,4}[a-z]?)\s+[CURMSLTP](?:\s|$)""")
     /** Neue Kartenrahmen: Nummer mit führender Null, z.B. "0077" (ohne "/Gesamtzahl"). */
@@ -67,8 +78,25 @@ object CardTextParser {
         val cn = code.collectorNumber
         val lang = code.lang
 
+        // Alte Karten: Künstler + Jahr stehen zentriert am unteren Rand (ganze Breite)
+        val footer = Region(card.left - 0.04f * w, card.bottom - 0.12f * h, card.right + 0.04f * w, card.bottom + 0.05f * h)
+        val hints = oldCardHints(lines.filter { footer.contains(it.cx, it.cy) })
+
         val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
-        return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang)
+        return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang,
+            code.total, hints.artist, hints.year)
+    }
+
+    /** "Illus. Christopher Rush" und "© 1993 Wizards of the Coast" vom unteren Rand alter Karten. */
+    fun oldCardHints(lines: List<OcrLine>): OldCardHints {
+        val text = lines.sortedBy { it.top }.joinToString("\n") { it.text }
+        val artist = ILLUS.find(text)?.groupValues?.get(1)
+            ?.substringBefore("©")?.substringBefore(" Wizards")?.substringBefore("  ")
+            ?.trim(' ', '.', '-', '&')?.takeIf { it.count(Char::isLetter) >= 4 }
+        val year = YEAR.find(text)?.groupValues?.get(1)
+            ?: if (text.contains("Wizards", ignoreCase = true))
+                Regex("""\b((?:199|20[0-3])\d)\b""").find(text)?.groupValues?.get(1) else null
+        return OldCardHints(artist, year)
     }
 
     /**
@@ -117,13 +145,15 @@ object CardTextParser {
             lang = m?.groupValues?.get(2)?.let { LANGS[it]?.ifEmpty { null } }
         }
 
-        val cn = (CN_SLASH.find(text)?.groupValues?.get(1)
+        val slash = CN_SLASH.find(text)
+        val total = slash?.groupValues?.get(2)?.trimStart('0')?.takeIf { it.isNotEmpty() && it.length >= 2 }
+        val cn = (slash?.groupValues?.get(1)
             ?: CN_RARITY_BEFORE.find(text)?.groupValues?.get(1)
             ?: CN_RARITY_AFTER.find(text)?.groupValues?.get(1)
             ?: CN_PADDED.find(text)?.groupValues?.get(1)
             ?: fuzzyNumber(text, set))
             ?.trimStart('0')?.ifEmpty { "0" }
-        return CodeResult(set, cn, lang, text.replace("\n", " / ").trim())
+        return CodeResult(set, cn, lang, text.replace("\n", " / ").trim(), total)
     }
 
     /** Nummer mit typischen Lesefehlern, z.B. "O077" -> "0077", "0l23" -> "0123". */

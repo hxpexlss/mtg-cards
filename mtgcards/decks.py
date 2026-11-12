@@ -88,6 +88,13 @@ def parse_decklist(text):
     return out
 
 
+def _num(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _kw(card):
     return {str(k).lower() for k in card.get("keywords") or []}
 
@@ -122,6 +129,10 @@ class DeckStore:
             cols = {r[1] for r in db.conn.execute("PRAGMA table_info(decks)")}
             if "status" not in cols:
                 db.conn.execute("ALTER TABLE decks ADD COLUMN status TEXT NOT NULL DEFAULT 'build'")
+            card_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(deck_cards)")}
+            for col in ("price_eur", "price_usd"):
+                if col not in card_cols:
+                    db.conn.execute(f"ALTER TABLE deck_cards ADD COLUMN {col} REAL")
             db.conn.commit()
 
     # -- Hilfen ---------------------------------------------------------------
@@ -135,6 +146,47 @@ class DeckStore:
             key = (name or "").lower()
             by_name[key] = by_name.get(key, 0) + qty
         return by_oracle, by_name
+
+    def _price_map(self):
+        """Durchschnittlicher Stückpreis (EUR) der echten Karten in der Sammlung nach oracle_id und Name."""
+        sums_o, sums_n = {}, {}
+        for row in self.db.conn.execute(
+                "SELECT oracle_id, name, quantity, foil, price_eur, price_eur_foil FROM cards WHERE proxy=0"):
+            c = dict(row)
+            p = self.db.card_price(c)
+            if p <= 0:
+                continue
+            for key, sums in ((c["oracle_id"], sums_o), ((c["name"] or "").lower(), sums_n)):
+                if key:
+                    s = sums.setdefault(key, [0.0, 0])
+                    s[0] += p * c["quantity"]
+                    s[1] += c["quantity"]
+        avg = lambda d: {k: v[0] / v[1] for k, v in d.items() if v[1]}  # noqa: E731
+        return avg(sums_o), avg(sums_n)
+
+    def refresh_prices(self, scryfall):
+        """Marktpreise (Standard-Druck) für alle Deckkarten aktualisieren – Basis für fehlende Karten."""
+        with self.db._lock:
+            names = sorted({r[0] for r in self.db.conn.execute("SELECT name FROM deck_cards")})
+        if not names:
+            return 0
+        found, _ = scryfall.collection_identifiers([{"name": n.split(" // ")[0]} for n in names])
+        prices = {}
+        for raw in found:
+            p = raw.get("prices") or {}
+            val = (_num(p.get("eur")) or _num(p.get("eur_foil")), _num(p.get("usd")) or _num(p.get("usd_foil")))
+            prices[raw["name"].lower()] = val
+            prices[raw["name"].split(" // ")[0].lower()] = val
+        n = 0
+        with self.db._lock:
+            for name in names:
+                val = prices.get(name.lower()) or prices.get(name.split(" // ")[0].lower())
+                if val:
+                    self.db.conn.execute("UPDATE deck_cards SET price_eur=?, price_usd=? WHERE name=?",
+                                         (val[0], val[1], name))
+                    n += 1
+            self.db.conn.commit()
+        return n
 
     def usage_maps(self):
         """Wo wird welche Karte verwendet? -> (nach oracle_id, nach Name): [{deck_id, deck, quantity}]"""
@@ -224,12 +276,14 @@ class DeckStore:
                 "SELECT * FROM deck_cards WHERE deck_id=? ORDER BY name COLLATE NOCASE", (deck_id,))]
             by_oracle, by_name = self._owned_maps()
             px_oracle, px_name = self._owned_maps(proxy=1)
+            price_oracle, price_name = self._price_map()
             use_oracle, use_name = self.usage_maps()
 
         commanders = [c for c in cards if c["board"] == "commander"]
         identity = set("".join(c["color_identity"] or "" for c in commanders))
         stats = {"cards": 0, "owned": 0, "missing": 0, "basic_lands": 0, "outside_identity": 0, "shared": 0,
-                 "missing_reserved": 0}
+                 "missing_reserved": 0, "value_eur": 0.0, "total_value_eur": 0.0, "missing_value_eur": 0.0,
+                 "without_price": 0}
         for c in cards:
             owned = by_oracle.get(c["oracle_id"]) if c["oracle_id"] else None
             if owned is None:
@@ -252,7 +306,19 @@ class DeckStore:
             c["group"] = {"commander": "Commander", "companion": "Companion"}.get(c["board"]) or next(
                 (t for t in _TYPE_ORDER if t in (c["type_line"] or "")), "Sonstige")
             c["warning"] = _role_warning(c, commanders)
+            # Preis: eigene (echte) Karten aus der Sammlung, sonst Marktpreis des Standard-Drucks
+            own_price = (price_oracle.get(c["oracle_id"]) if c["oracle_id"] else None) or \
+                price_name.get(c["name"].lower())
+            market = c.get("price_eur") or 0.0
+            unit = own_price or market
+            c["unit_price_eur"] = round(unit, 2) if unit else None
+            c["value_eur"] = round(unit * c["quantity"], 2) if unit else None
             if c["board"] in DECK_BOARDS:
+                have = c["quantity"] - c["missing"]
+                stats["value_eur"] += (own_price or market) * have
+                stats["total_value_eur"] += unit * c["quantity"]
+                stats["missing_value_eur"] += (market or unit) * c["missing"]
+                stats["without_price"] += 0 if unit or c["basic"] else 1
                 stats["cards"] += c["quantity"]
                 stats["missing"] += c["missing"]
                 stats["owned"] += c["quantity"] - c["missing"]
@@ -264,6 +330,8 @@ class DeckStore:
         deck["commanders"] = [c["name"] for c in commanders]
         deck["companions"] = [c["name"] for c in cards if c["board"] == "companion"]
         stats["role_warnings"] = sum(1 for c in cards if c["warning"])
+        for k in ("value_eur", "total_value_eur", "missing_value_eur"):
+            stats[k] = round(stats[k], 2)
         deck["color_identity"] = "".join(x for x in "WUBRG" if x in identity)
         deck["stats"] = stats
         return deck
@@ -284,15 +352,19 @@ class DeckStore:
             else:
                 self.db.conn.execute(
                     """INSERT INTO deck_cards(deck_id, name, oracle_id, quantity, board, type_line, mana_cost, cmc,
-                                              color_identity, image_url, keywords)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                                              color_identity, image_url, keywords, price_eur, price_usd)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(deck_id, name, board) DO UPDATE SET quantity=excluded.quantity,
                          oracle_id=excluded.oracle_id, type_line=excluded.type_line, mana_cost=excluded.mana_cost,
                          cmc=excluded.cmc, color_identity=excluded.color_identity, image_url=excluded.image_url,
-                         keywords=excluded.keywords""",
+                         keywords=excluded.keywords,
+                         price_eur=COALESCE(excluded.price_eur, price_eur),
+                         price_usd=COALESCE(excluded.price_usd, price_usd)""",
                     (deck_id, card["name"], card.get("oracle_id"), qty, board, card.get("type_line"),
                      card.get("mana_cost"), card.get("cmc"), card.get("color_identity") or "",
-                     card.get("image_url"), json.dumps(card.get("keywords") or [])))
+                     card.get("image_url"), json.dumps(card.get("keywords") or []),
+                     _num(card.get("price_eur")) or _num(card.get("price_eur_foil")),
+                     _num(card.get("price_usd")) or _num(card.get("price_usd_foil"))))
             self.db.conn.execute("UPDATE decks SET updated_at=? WHERE id=?", (now_iso(), deck_id))
             self.db._bump()
             self.db.conn.commit()

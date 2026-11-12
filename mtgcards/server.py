@@ -332,6 +332,7 @@ def r_get(h, qs, cid):
     if not card:
         raise ApiError(404, "Karte nicht gefunden")
     card["decks"] = h.ctx.decks.usage_for(card.get("oracle_id"), card["name"])
+    card["related"] = h.ctx.db.related(card)
     h.send_json(card)
 
 
@@ -347,11 +348,14 @@ def _lookup_from(h, data):
         lang=data.get("lang"),
         scryfall_id=data.get("id") or data.get("scryfall_id"),
         prefer_set=data.get("prefer_set"),
+        total=data.get("total") or None,
+        artist=data.get("artist") or None,
+        year=data.get("year") or None,
     )
 
 
 def r_lookup(h, qs):
-    data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id", "prefer_set")}
+    data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id", "prefer_set", "total", "artist", "year")}
     if data["lang"] == "auto":
         data["lang"] = ""
     data["alt"] = qs.get("alt", [])
@@ -414,11 +418,28 @@ def r_add_batch(h, qs):
 
 
 def r_patch(h, qs, cid):
-    res = h.ctx.db.update(_card_id(cid), h.read_json())
+    data = h.read_json()
+    new_id = data.pop("scryfall_id", None)
+    if new_id:
+        # Anderen Druck übernehmen (Edition / Sprache korrigieren)
+        try:
+            raw = h.ctx.scryfall.with_prices(h.ctx.scryfall.lookup(scryfall_id=new_id))
+        except ScryfallError as e:
+            raise ApiError(e.status if e.status in (400, 404) else 502, str(e)) from None
+        if h.ctx.db.get(_card_id(cid)) is None:
+            raise ApiError(404, "Karte nicht gefunden")
+        cid = h.ctx.db.change_print(_card_id(cid), normalize_card(raw))["id"]
+        if not data:
+            res = h.ctx.db.get(cid)
+            res["decks"] = h.ctx.decks.usage_for(res.get("oracle_id"), res["name"])
+            res["related"] = h.ctx.db.related(res)
+            return h.send_json(res)
+    res = h.ctx.db.update(_card_id(cid), data)
     if res is None:
         raise ApiError(404, "Karte nicht gefunden")
     if not res.get("deleted"):
         res["decks"] = h.ctx.decks.usage_for(res.get("oracle_id"), res["name"])
+        res["related"] = h.ctx.db.related(res)
     h.send_json(res)
 
 
@@ -437,7 +458,7 @@ def r_refresh(h, qs, cid):
     else:
         raw = h.ctx.scryfall.lookup(name=card["name"], set_code=card.get("set_code"),
                                     collector_number=card.get("collector_number"))
-    h.send_json(h.ctx.db.refresh_card_data(card["id"], normalize_card(raw)))
+    h.send_json(h.ctx.db.refresh_card_data(card["id"], normalize_card(h.ctx.scryfall.with_prices(raw))))
 
 
 def refresh_all(ctx):
@@ -445,6 +466,9 @@ def refresh_all(ctx):
     from .db import now_iso
     cards = ctx.db.all()
     fetched = ctx.scryfall.collection(sorted({c["scryfall_id"] for c in cards if c.get("scryfall_id")}))
+    # Fremdsprachige Drucke haben bei Scryfall keine Preise -> vom englischen Druck übernehmen
+    if hasattr(ctx.scryfall, "fill_prices"):
+        fetched = ctx.scryfall.fill_prices(fetched)
     updated = 0
     for c in cards:
         raw = fetched.get(c.get("scryfall_id"))
@@ -456,6 +480,10 @@ def refresh_all(ctx):
     wishes = None
     try:
         wishes = ctx.wishlist.refresh_prices(ctx.scryfall)
+    except ScryfallError:
+        pass
+    try:
+        ctx.decks.refresh_prices(ctx.scryfall)
     except ScryfallError:
         pass
     return {"updated": updated, "total": len(cards), "missing": len(cards) - updated, "wishlist": wishes}
@@ -482,12 +510,14 @@ def r_prints(h, qs):
     name = _first(qs, "name").strip()
     if not name:
         raise ApiError(400, "name angeben")
+    lang = _first(qs, "lang").strip().lower()
     out = []
-    for raw in h.ctx.scryfall.prints(name):
+    for raw in h.ctx.scryfall.prints(name, lang) if lang else h.ctx.scryfall.prints(name):
         c = normalize_card(raw)
-        out.append({k: c[k] for k in ("scryfall_id", "name", "set_code", "set_name",
-                                      "collector_number", "rarity", "image_url", "lang",
-                                      "price_eur", "price_usd")})
+        out.append({k: c.get(k) for k in ("scryfall_id", "name", "printed_name", "set_code", "set_name",
+                                          "collector_number", "rarity", "image_url", "lang",
+                                          "price_eur", "price_eur_foil", "price_usd", "artist", "released_at",
+                                          "illustration_id", "art_url")})
     h.send_json({"data": out})
 
 

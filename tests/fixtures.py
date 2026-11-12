@@ -65,7 +65,8 @@ class FakeScryfall:
     def __init__(self):
         self.calls = 0
 
-    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None, prefer_set=None):
+    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None, prefer_set=None,
+               **_hints):
         self.calls += 1
         if scryfall_id:
             for c in ALL:
@@ -99,6 +100,9 @@ class FakeScryfall:
             match = [c for c in ALL if c["lang"] == "en" and c["name"].lower() == ident.get("name", "").lower()]
             (found.append(match[0]) if match else missing.append(ident))
         return found, missing
+
+    def with_prices(self, raw):
+        return raw
 
     def collection(self, ids):
         self.calls += 1

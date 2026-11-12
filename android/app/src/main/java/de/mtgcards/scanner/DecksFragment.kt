@@ -102,6 +102,7 @@ class DeckAdapter(private val onClick: (Long) -> Unit) : RecyclerView.Adapter<De
             if (ci.isNotBlank()) append(ci).append(" · ")
             append("${st.optInt("owned")}/${st.optInt("cards")} vorhanden")
             append(if (missing > 0) " · $missing fehlen" else " · ✓ komplett")
+            append(" · Wert ${euro(st.optDouble("value_eur", 0.0))}")
         }
         val cards = st.optInt("cards")
         holder.progress.max = if (cards > 0) cards else 1

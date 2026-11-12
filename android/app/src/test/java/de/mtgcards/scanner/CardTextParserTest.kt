@@ -116,4 +116,31 @@ class CandidateVoterTest {
         assertEquals(1.0, similarity("abc", "abc"), 0.0)
         assertEquals(0.75, similarity("abcd", "abce"), 0.001)
     }
+
+    @Test
+    fun oldCardNumberWithSetSize() {
+        val lines = listOf(
+            line("Lightning Bolt", 130, 225, 400, 255),
+            line("146/249 C", 120, 1015, 260, 1035),
+            line("Illus. Christopher Moeller", 300, 1040, 560, 1058),
+        )
+        val r = CardTextParser.parse(lines, card)
+        assertEquals("146", r.collectorNumber)
+        assertEquals("249", r.total)
+        assertNull(r.setCode)
+        assertEquals("Christopher Moeller", r.artist)
+    }
+
+    @Test
+    fun veryOldCardArtistAndYear() {
+        val lines = listOf(
+            line("Lightning Bolt", 130, 225, 400, 255),
+            line("Illus. Christopher Rush", 300, 1020, 560, 1038),
+            line("© 1993-1995 Wizards of the Coast, Inc.", 250, 1042, 600, 1060),
+        )
+        val r = CardTextParser.parse(lines, card)
+        assertEquals("Christopher Rush", r.artist)
+        assertEquals("1995", r.year)
+        assertNull(r.total)
+    }
 }

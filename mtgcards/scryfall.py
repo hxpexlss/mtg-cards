@@ -100,6 +100,8 @@ def normalize_card(raw):
         printed_name = " // ".join(f.get("printed_name", "") for f in faces)
 
     prices = raw.get("prices") or {}
+    art = (raw.get("image_uris") or {}).get("art_crop") or (
+        (faces[0].get("image_uris") or {}).get("art_crop") if faces else None)
     card = {
         "scryfall_id": raw.get("id"),
         "oracle_id": raw.get("oracle_id") or (faces[0].get("oracle_id") if faces else None),
@@ -128,6 +130,11 @@ def normalize_card(raw):
         "price_usd": prices.get("usd"),
         "price_usd_foil": prices.get("usd_foil"),
     }
+    # nur für Anzeige / Druck-Erkennung (nicht in der DB gespeichert)
+    card["artist"] = raw.get("artist") or (faces[0].get("artist") if faces else None)
+    card["released_at"] = raw.get("released_at")
+    card["illustration_id"] = raw.get("illustration_id") or (faces[0].get("illustration_id") if faces else None)
+    card["art_url"] = art
     card["auto_tags"] = auto_tags(card)
     card["match"] = raw.get("_match")      # wie sicher der Druck ist (nur für die Anzeige, nicht gespeichert)
     return card
@@ -336,34 +343,80 @@ class Scryfall:
         return cards
 
     # -- Sprache -------------------------------------------------------------
-    def localize(self, raw, lang):
-        """Gleiche Karte in einer anderen Sprache (z.B. "de"). Fällt auf das Original zurück."""
+    def localize(self, raw, lang, keep_print=False):
+        """Gleiche Karte in einer anderen Sprache (z.B. "de"). Fällt auf das Original zurück.
+
+        keep_print=True: Gibt es den Druck (Set + Nummer) nicht in der Sprache, bleibt der Druck erhalten
+        (richtige Edition ist wichtiger als die Sprache). Sonst der neueste Druck in dieser Sprache.
+        """
         lang = (lang or "").lower()
-        if not lang or lang in ("auto", "any") or raw.get("lang") == lang:
+        if not lang or lang in ("auto", "any") or (raw.get("lang") or "en") == lang:
             return raw
         try:
             return self.by_set_number(raw["set"], raw["collector_number"], lang)
         except (ScryfallError, KeyError):
             pass
+        if keep_print:
+            return raw
         safe = (raw.get("name") or "").split(" // ")[0].replace('"', "")
         try:
-            data = self.search(f'!"{safe}" lang:{lang}', unique="prints", order="released")
+            data = self._get("/cards/search", {"q": f'!"{safe}" lang:{lang}', "unique": "prints",
+                                               "order": "released", "dir": "desc"})
             if data.get("data"):
                 return data["data"][0]
         except ScryfallError:
             pass
         return raw
 
+    # -- Preise --------------------------------------------------------------
+    @staticmethod
+    def _has_price(raw):
+        prices = raw.get("prices") or {}
+        return any(prices.get(k) for k in ("eur", "eur_foil", "usd", "usd_foil"))
+
+    def with_prices(self, raw):
+        """Scryfall führt Preise nur beim englischen Druck. Fremdsprachige Karten bekommen die Preise
+        des englischen Drucks mit gleichem Set + Sammlernummer."""
+        if self._has_price(raw) or (raw.get("lang") or "en") == "en" or not raw.get("set"):
+            return raw
+        try:
+            en = self.by_set_number(raw["set"], raw["collector_number"])
+        except (ScryfallError, KeyError):
+            return raw
+        return dict(raw, prices=en.get("prices") or {})
+
+    def fill_prices(self, raws):
+        """Wie with_prices für viele Karten auf einmal (Sammelabfrage). raws: {schlüssel: karte} – wird ergänzt."""
+        need = {k: r for k, r in raws.items()
+                if not self._has_price(r) and (r.get("lang") or "en") != "en" and r.get("set")}
+        if not need:
+            return raws
+        idents = list({(r["set"], r["collector_number"]) for r in need.values()})
+        try:
+            found, _ = self.collection_identifiers([{"set": s, "collector_number": n} for s, n in idents])
+        except ScryfallError:
+            return raws
+        prices = {(c.get("set"), c.get("collector_number")): c.get("prices") or {} for c in found}
+        for k, r in need.items():
+            p = prices.get((r["set"], r["collector_number"]))
+            if p:
+                raws[k] = dict(r, prices=p)
+        return raws
+
     def autocomplete(self, q):
         if len(q.strip()) < 2:
             return []
         return self._get("/cards/autocomplete", {"q": q}).get("data", [])
 
-    def prints(self, name):
-        """Alle Drucke einer Karte (exakter Name)."""
+    def prints(self, name, lang=None):
+        """Alle Drucke einer Karte (exakter Name), optional in einer Sprache (z.B. "de")."""
         safe = name.replace('"', "")
+        q = f'!"{safe}"'
+        lang = (lang or "").lower()
+        if lang and lang not in ("en", "auto"):
+            q += " lang:any" if lang == "any" else f" lang:{lang}"
         try:
-            data = self.search(f'!"{safe}"', unique="prints", order="released")
+            data = self.search(q, unique="prints", order="released")
         except ScryfallError as e:
             if e.status == 404:
                 return []
@@ -388,13 +441,19 @@ class Scryfall:
     def lookup_any(self, name=None, alternatives=(), **kw):
         """Wie lookup(), probiert bei "nicht gefunden" aber weitere Namenskandidaten (vom Scanner).
 
-        Mit lang (z.B. "de") wird der Druck in dieser Sprache gesucht.
+        Sprache des Ergebnisses (nie ein zufälliger Treffer):
+        1. lang (Scan-Sprache), falls angegeben
+        2. die Sprache, in der der gelesene Name wirklich gedruckt ist (deutscher Name -> deutscher Druck)
+        3. Englisch
+        Fremdsprachige Drucke bekommen die Preise des englischen Drucks.
         """
-        lang = kw.get("lang")
-        if lang and lang.lower() not in ("auto", "any", "en"):
-            found = self._lookup_any(name, alternatives, **kw)
-            return dict(self.localize(found, lang), _match=found.get("_match"))
-        return self._lookup_any(name, alternatives, **kw)
+        found = self._lookup_any(name, alternatives, **kw)
+        target = target_lang(found, kw.get("lang"))
+        out = found
+        if (found.get("lang") or "en") != target:
+            out = self.localize(found, target, keep_print=found.get("_match") in ("exact", "set", "id", "likely", "preferred"))
+        out = self.with_prices(out)
+        return dict(out, _match=found.get("_match"))
 
     def _lookup_any(self, name=None, alternatives=(), **kw):
         try:
@@ -415,13 +474,16 @@ class Scryfall:
         raise first
 
     def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None,
-               prefer_set=None):
+               prefer_set=None, total=None, artist=None, year=None):
         """Findet eine Karte und merkt sich, wie sicher der Druck ist (Feld "_match"):
 
-        "exact"     – Set-Code + Sammlernummer vom Kartenrand passen
+        "exact"     – Set-Code + Sammlernummer vom Kartenrand passen (bei alten Karten: Nummer + Set-Größe)
         "set"       – Name + gelesener Set-Code
+        "likely"    – alte Karte: Künstler / Jahr / Nummer passen zu genau einem Druck
         "preferred" – Name + bevorzugte Edition (zuletzt gescannt / im Scanner festgelegt)
         "name"      – nur der Name: Scryfalls Standard-Druck (meist der neueste)
+
+        Wurde der Name in einer anderen Sprache gelesen, steht diese in "_name_lang".
         """
         if scryfall_id:
             return _tag(self.by_id(scryfall_id), "id")
@@ -433,7 +495,7 @@ class Scryfall:
         # 1) Set-Code + Sammlernummer (mit typischen OCR-Verwechslungen im Set-Code: 0/O, 1/I, 5/S …)
         if set_code and collector_number:
             for code in set_code_variants(set_code):
-                for lg in ([lang, None] if lang and lang.lower() != "en" else [None]):
+                for lg in ([lang, None] if lang and lang.lower() not in ("en", "auto") else [None]):
                     try:
                         card = self.by_set_number(code, collector_number, lg)
                     except ScryfallError as e:
@@ -442,57 +504,182 @@ class Scryfall:
                         continue
                     if not name or name_matches(name, card):
                         return _tag(card, "exact")
+                    # Name in anderer Sprache gelesen? -> gleicher Druck, Name passt zum gedruckten Namen
+                    local = self._named_in_set(name, code, collector_number)
+                    if local and local.get("collector_number", "").lstrip("0") == collector_number:
+                        return dict(_tag(local, "exact"), _name_lang=_printed_lang(name, local))
 
         if not name:
             raise ScryfallError("Kein Kartenname angegeben", 400)
 
-        # 2) Name + gelesener Set-Code, dann Name + bevorzugte Edition
-        tries = [(code, "set") for code in set_code_variants(set_code)] if set_code else []
-        if prefer_set and prefer_set != set_code:
-            tries.append((prefer_set, "preferred"))
-        for code, how in tries:
-            card = self._named_in_set(name, code)
+        # 2) Name + gelesener Set-Code
+        for code in set_code_variants(set_code) if set_code else []:
+            card = self._named_in_set(name, code, collector_number)
             if card:
-                return _tag(card, how)
+                return dict(_tag(card, "set"), _name_lang=_printed_lang(name, card))
 
-        # 3) Nur der Name
+        # 3) Karte über den Namen finden (Standard-Druck)
+        base = self._by_name(name)
+        name_lang = _printed_lang(name, base)
+
+        # 4) Alte Karten: Nummer "123/249", Künstler, Jahr
+        if collector_number or total or artist or year:
+            old = self._old_print(base, collector_number, total, artist, year, prefer_set)
+            if old:
+                return dict(old, _name_lang=name_lang)
+
+        # 5) Bevorzugte Edition
+        if prefer_set and prefer_set != set_code:
+            card = self._named_in_set(base.get("name") or name, prefer_set)
+            if card:
+                return dict(_tag(card, "preferred"), _name_lang=name_lang)
+
+        return dict(_tag(base, "name"), _name_lang=name_lang)
+
+    def _by_name(self, name):
+        """Standard-Druck zu einem (OCR-)Namen – englisch oder fremdsprachig."""
         try:
-            return _tag(self.named(name), "name")
+            return self.named(name)
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
             last = e
-
         # Fremdsprachige Namen (z.B. deutsche Karten) über die Volltextsuche
         safe = name.replace('"', "")
         try:
             data = self.search(f'"{safe}" lang:any', unique="prints", order="released")
             results = data.get("data") or []
-            for card in results:
-                if name_matches(name, card, threshold=0.7):
-                    return _tag(card, "name")
-            if results:
-                return _tag(results[0], "name")
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
+            results = []
+        matches = [c for c in results if name_matches(name, c, threshold=0.7)]
+        if matches:
+            # Bester Treffer: gedruckter Name am ähnlichsten, bei Gleichstand lateinische Sprachen zuerst
+            return max(matches, key=lambda c: (_similarity(name, c), (c.get("lang") or "en") not in NON_LATIN_LANGS))
         raise ScryfallError(f'Keine Karte gefunden für "{name}"', 404) from last
 
-    def _named_in_set(self, name, code):
-        """Karte per Name in einer bestimmten Edition – englischer oder fremdsprachiger Name."""
+    def _named_in_set(self, name, code, collector_number=None):
+        """Karte per Name in einer bestimmten Edition – englischer oder fremdsprachiger Name.
+        Mit collector_number wird bei mehreren Drucken im Set (Showcase …) dieser bevorzugt."""
+        card = None
         try:
-            return self.named(name, code)
+            card = self.named(name, code)
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
+        if card and (not collector_number or card.get("collector_number", "").lstrip("0") == collector_number):
+            return card
         safe = name.replace('"', "")
         try:
             data = self.search(f'"{safe}" lang:any e:{code.lower()}', unique="prints", order="released")
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
+            return card
+        hits = [c for c in data.get("data") or [] if name_matches(name, c, threshold=0.7)]
+        if collector_number:
+            same = [c for c in hits if c.get("collector_number", "").lstrip("0") == collector_number]
+            if same:
+                hits = same
+        if hits:
+            return max(hits, key=lambda c: (_similarity(name, c), (c.get("lang") or "en") not in NON_LATIN_LANGS))
+        return card
+
+    def _set_sizes(self):
+        try:
+            return {s["code"]: {s.get("printed_size"), s.get("card_count")} for s in self.sets()}
+        except ScryfallError:
+            return {}
+
+    def _old_print(self, base, collector_number=None, total=None, artist=None, year=None, prefer_set=None):
+        """Druck alter Karten ohne Set-Code anhand der Hinweise am Kartenrand bestimmen.
+
+        - "123/249": Nummer + Kartenanzahl der Edition (2003–2014)
+        - "Illus. Name": Künstler (Neudrucke haben oft ein anderes Artwork)
+        - "© 1995": Erscheinungsjahr
+        """
+        prints = [p for p in self.prints(base.get("name") or "") if not p.get("digital")]
+        if not prints:
             return None
-        for card in data.get("data") or []:
-            if name_matches(name, card, threshold=0.7):
-                return card
-        return None
+        sizes = self._set_sizes() if total else {}
+        try:
+            total = int(total) if total else None
+            year = int(year) if year else None
+        except (TypeError, ValueError):
+            total = year = None
+        scored = []
+        for i, p in enumerate(prints):
+            score, strong = 0, False
+            cn_ok = bool(collector_number) and (p.get("collector_number") or "").lstrip("0") == collector_number
+            size_ok = bool(total) and total in sizes.get(p.get("set"), ())
+            if cn_ok:
+                score += 3
+            if size_ok:
+                score += 3
+            strong = cn_ok and size_ok
+            if artist and _artist_matches(artist, p.get("artist")):
+                score += 2
+            released = (p.get("released_at") or "")[:4]
+            if year and released.isdigit() and 0 <= int(released) - year <= 1:
+                score += 1
+            if prefer_set and (p.get("set") or "").upper() == prefer_set:
+                score += 1
+            scored.append((score, strong, -i, p))
+        scored.sort(key=lambda t: (t[0], t[1], t[2]), reverse=True)
+        best = scored[0]
+        if best[0] < 2:
+            return None
+        if len(scored) > 1 and scored[1][0] == best[0] and not best[1]:
+            # Gleichstand: nur übernehmen, wenn es dasselbe Artwork ist (Bild ist dann ohnehin gleich)
+            if scored[1][3].get("illustration_id") != best[3].get("illustration_id"):
+                return None
+        return _tag(best[3], "exact" if best[1] else "likely")
+
+
+NON_LATIN_LANGS = {"ja", "zhs", "zht", "ko", "ru", "ph", "he", "ar", "sa", "grc"}
+
+
+def _similarity(query, card):
+    q = _norm(query)
+    best = 0.0
+    for c in [card.get("name"), card.get("printed_name")] + [
+            f.get(k) for f in card.get("card_faces") or [] for k in ("name", "printed_name")]:
+        c = _norm(c)
+        if c:
+            best = max(best, 1.0 if q == c else difflib.SequenceMatcher(None, q, c).ratio())
+    return best
+
+
+def _printed_lang(name, card):
+    """Sprache, in der der gelesene Name gedruckt ist: die Kartensprache, wenn der Name zum gedruckten
+    (übersetzten) Namen besser passt als zum englischen – sonst Englisch."""
+    lang = (card.get("lang") or "en").lower()
+    if not name or lang == "en" or lang in NON_LATIN_LANGS:
+        return "en"
+    q = _norm(name)
+
+    def ratio(vals):
+        return max([difflib.SequenceMatcher(None, q, _norm(v)).ratio() for v in vals if v] or [0.0])
+
+    faces = card.get("card_faces") or []
+    printed = ratio([card.get("printed_name")] + [f.get("printed_name") for f in faces])
+    english = ratio([card.get("name")] + [f.get("name") for f in faces])
+    return lang if printed >= 0.7 and printed > english else "en"
+
+
+def target_lang(card, lang=None):
+    """Sprache, in der eine gefundene Karte gespeichert wird (siehe Scryfall.lookup_any)."""
+    lang = (lang or "").lower()
+    if lang and lang not in ("auto", "any"):
+        return lang
+    return card.get("_name_lang") or "en"
+
+
+def _artist_matches(read, artist):
+    a, b = _norm(read), _norm(artist)
+    if not a or not b:
+        return False
+    if len(a) >= 5 and (a in b or b in a):
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.75

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from .tags import AUTO_TAGS, auto_tags, merge_tags
+from .tags import AUTO_TAGS, auto_tags, emblem_matches, is_emblem, merge_tags
 
 CARD_FIELDS = [
     "scryfall_id", "oracle_id", "name", "printed_name", "lang", "set_code", "set_name",
@@ -141,9 +141,21 @@ class Database:
                 self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (json.dumps(tag_list + ["Token"]), cid))
         self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('token_tag_v1', '1')")
 
+    def _tag_emblems_once(self):
+        """Einmalig: vorhandene Embleme bekommen den automatischen Tag "Emblem"."""
+        if self.conn.execute("SELECT value FROM meta WHERE key='emblem_tag_v1'").fetchone():
+            return
+        for cid, tags in self.conn.execute(
+                "SELECT id, tags FROM cards WHERE type_line LIKE 'Emblem%'").fetchall():
+            tag_list = _as_list(tags)
+            if "Emblem" not in tag_list:
+                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (json.dumps(tag_list + ["Emblem"]), cid))
+        self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('emblem_tag_v1', '1')")
+
     def _migrate(self):
         """Ältere Datenbanken: Spalte 'proxy' ergänzen (Proxies sind eigene Einträge)."""
         self._tag_tokens_once()
+        self._tag_emblems_once()
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(cards)")}
         if "proxy" not in cols:
             self.conn.execute("ALTER TABLE cards ADD COLUMN proxy INTEGER NOT NULL DEFAULT 0")
@@ -318,6 +330,50 @@ class Database:
             self._bump()
             self.conn.commit()
             return self.get(card_id)
+
+    def change_print(self, card_id, card):
+        """Anderen Druck (Edition/Sprache) für einen Eintrag übernehmen. Gibt es den Druck schon
+        (gleiche Foil-Art, Proxy/echt), werden die Einträge zusammengeführt."""
+        with self._lock:
+            ex = self.get(card_id)
+            if ex is None:
+                return None
+            dup = self.conn.execute(
+                "SELECT id FROM cards WHERE scryfall_id=? AND foil=? AND proxy=? AND id!=?",
+                (card.get("scryfall_id"), 1 if ex["foil"] else 0, 1 if ex["proxy"] else 0, card_id)).fetchone()
+            if dup:
+                tags = merge_tags(self.get(dup[0])["tags"], ex["tags"])
+                self.conn.execute("UPDATE cards SET quantity=quantity+?, tags=?, updated_at=? WHERE id=?",
+                                  (ex["quantity"], json.dumps(tags), now_iso(), dup[0]))
+                self.conn.execute("DELETE FROM cards WHERE id=?", (card_id,))
+                self.conn.commit()
+                card_id = dup[0]
+            return self.refresh_card_data(card_id, card)
+
+    def related(self, card):
+        """Verknüpfungen Emblem <-> Planeswalker. Wird bei jeder Abfrage neu berechnet,
+        deshalb ist die Reihenfolge des Hinzufügens egal."""
+        if not card:
+            return []
+        tl = card.get("type_line") or ""
+        cols = "id, name, printed_name, set_code, collector_number, image_url, quantity, type_line, proxy"
+        with self._lock:
+            if is_emblem(card):
+                rows = [dict(r) for r in self.conn.execute(
+                    f"SELECT {cols} FROM cards WHERE type_line LIKE '%Planeswalker%'")]
+                hits = [r for r in rows if emblem_matches(card, r)]
+                kind = "planeswalker"
+            elif "Planeswalker" in tl.split("//")[0] or "Planeswalker" in tl:
+                rows = [dict(r) for r in self.conn.execute(
+                    f"SELECT {cols} FROM cards WHERE type_line LIKE 'Emblem%'")]
+                hits = [r for r in rows if emblem_matches(r, card)]
+                kind = "emblem"
+            else:
+                return []
+        for h in hits:
+            h["kind"] = kind
+            h["proxy"] = bool(h["proxy"])
+        return sorted(hits, key=lambda h: (h["name"].lower(), h["set_code"] or ""))
 
     def delete(self, card_id):
         with self._lock:
