@@ -70,6 +70,17 @@ class CardTextParserTest {
         assertEquals("123", old.collectorNumber)
         assertEquals("MH3", old.setCode)
         assertNull(CardTextParser.parseCode(listOf(line("Irgendwas", 70, 410, 200, 450)), strip).setCode)
+
+        // typische OCR-Fehler: Punkt als "e" gelesen, O statt 0
+        val ocr = CardTextParser.parseCode(listOf(line("O077 C", 70, 410, 200, 450),
+            line("FDN e DE  Anna de Vries", 70, 470, 420, 510)), strip)
+        assertEquals("FDN", ocr.setCode)
+        assertEquals("de", ocr.lang)
+        assertEquals("77", ocr.collectorNumber)
+        // Trennzeichen "·" und Nummer ohne Seltenheit
+        val mid = CardTextParser.parseCode(listOf(line("0212", 70, 410, 200, 450),
+            line("MH3 · EN", 70, 470, 200, 510)), strip)
+        assertEquals(listOf("MH3", "212", "en"), listOf(mid.setCode, mid.collectorNumber, mid.lang))
     }
 
     @Test

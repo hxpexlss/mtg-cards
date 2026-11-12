@@ -12,7 +12,7 @@ data class Region(val left: Float, val top: Float, val right: Float, val bottom:
     fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
 }
 
-data class CodeResult(val setCode: String?, val collectorNumber: String?, val lang: String?)
+data class CodeResult(val setCode: String?, val collectorNumber: String?, val lang: String?, val raw: String = "")
 
 data class ScanResult(
     val name: String?,
@@ -82,26 +82,70 @@ object CardTextParser {
         return collectorInfo(lines.filter { area.contains(it.cx, it.cy) })
     }
 
-    /** Set-Code, Sammlernummer und Sprache aus den Textzeilen am unteren Rand. */
+    /** Sprachcodes am Kartenrand -> Scryfall-Sprache ("" = bekannt, aber ohne eigene Sprache, z.B. PH). */
+    private val LANGS = mapOf(
+        "EN" to "en", "DE" to "de", "FR" to "fr", "IT" to "it", "ES" to "es", "SP" to "es", "PT" to "pt",
+        "JA" to "ja", "JP" to "ja", "KO" to "ko", "KR" to "ko", "RU" to "ru", "ZHS" to "zhs", "ZHT" to "zht",
+        "CS" to "zhs", "CT" to "zht", "PH" to "",
+    )
+    private val TOKEN = Regex("[A-Z0-9]+")
+
+    /**
+     * Set-Code, Sammlernummer und Sprache aus den Textzeilen am unteren Rand.
+     * Tolerant gegenüber OCR-Fehlern: Trennzeichen statt "•" (".", "·", "*", "e" …), O/0 und I/1 in der Nummer.
+     */
     fun collectorInfo(lines: List<OcrLine>): CodeResult {
         val text = lines.sortedBy { it.top }.joinToString("\n") { it.text }
+        val upper = text.uppercase()
+
+        // Set-Code + Sprache: Token-Paar "<SET> [Störzeichen] <SPRACHE>"
+        var set: String? = null
+        var lang: String? = null
+        val tokens = TOKEN.findAll(upper).map { it.value }.toList()
+        for (i in tokens.indices) {
+            val code = LANGS[tokens[i]] ?: continue
+            val prev = tokens.getOrNull(i - 1)?.let { p -> if (p.length == 1) tokens.getOrNull(i - 2) else p }
+            if (prev != null && prev.length in 3..5 && prev.any(Char::isLetter) && prev !in LANGS) {
+                set = prev
+                lang = code.ifEmpty { null }
+                break
+            }
+        }
+        if (set == null) {
+            val m = SET_LANG.find(upper)
+            set = m?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
+            lang = m?.groupValues?.get(2)?.let { LANGS[it]?.ifEmpty { null } }
+        }
+
         val cn = (CN_SLASH.find(text)?.groupValues?.get(1)
             ?: CN_RARITY_BEFORE.find(text)?.groupValues?.get(1)
             ?: CN_RARITY_AFTER.find(text)?.groupValues?.get(1)
-            ?: CN_PADDED.find(text)?.groupValues?.get(1))
+            ?: CN_PADDED.find(text)?.groupValues?.get(1)
+            ?: fuzzyNumber(text, set))
             ?.trimStart('0')?.ifEmpty { "0" }
-        val setMatch = SET_LANG.find(text.uppercase())
-        val set = setMatch?.groupValues?.get(1)?.takeIf { it.any(Char::isLetter) }
-        val lang = setMatch?.groupValues?.get(2)?.let { code ->
-            when (code) {
-                "JP" -> "ja"
-                "CS" -> "zhs"
-                "CT" -> "zht"
-                "PH" -> null
-                else -> code.lowercase()
-            }
+        return CodeResult(set, cn, lang, text.replace("\n", " / ").trim())
+    }
+
+    /** Nummer mit typischen Lesefehlern, z.B. "O077" -> "0077", "0l23" -> "0123". */
+    private fun fuzzyNumber(text: String, set: String?): String? {
+        for (raw in text.split(Regex("[\\s/]+"))) {
+            val t = raw.trim { !it.isLetterOrDigit() }
+            if (t.isEmpty() || t.equals(set, ignoreCase = true) || t.uppercase() in LANGS) continue
+            val digitsBefore = t.count(Char::isDigit)
+            val fixed = t.map { c ->
+                when (c) {
+                    'O', 'o', 'D', 'Q' -> '0'
+                    'I', 'l', '|', 'i' -> '1'
+                    'S' -> '5'
+                    'B' -> '8'
+                    else -> c
+                }
+            }.joinToString("")
+            // nur Nummern mit führender Null (neue Rahmen) oder dreistellig – keine Jahreszahl wie "2024"
+            val plausible = fixed.startsWith("0") || fixed.trimEnd { it.isLetter() }.length == 3
+            if (digitsBefore >= 2 && plausible && Regex("""0?\d{2,4}[a-z]?""").matches(fixed)) return fixed
         }
-        return CodeResult(set, cn, lang)
+        return null
     }
 
     /** Entfernt Mana-Symbole/OCR-Müll: behält nur Wörter, die überwiegend aus Buchstaben bestehen. */
