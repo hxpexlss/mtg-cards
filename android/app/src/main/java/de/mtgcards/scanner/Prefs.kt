@@ -41,6 +41,18 @@ object Prefs {
         sp(ctx).edit().putBoolean("proxy_mode", value).apply()
     }
 
+    /** Ziel-Deck beim Scannen (0 = keins). */
+    fun scanDeckId(ctx: Context): Long = sp(ctx).getLong("scan_deck_id", 0L)
+    fun scanDeckName(ctx: Context): String = sp(ctx).getString("scan_deck_name", "") ?: ""
+    fun setScanDeck(ctx: Context, id: Long, name: String) {
+        sp(ctx).edit().putLong("scan_deck_id", id).putString("scan_deck_name", name).apply()
+    }
+
+    fun defaultFoil(ctx: Context): Boolean = sp(ctx).getBoolean("default_foil", false)
+    fun setDefaultFoil(ctx: Context, value: Boolean) {
+        sp(ctx).edit().putBoolean("default_foil", value).apply()
+    }
+
     fun landscape(ctx: Context): Boolean = sp(ctx).getBoolean("landscape", false)
     fun setLandscape(ctx: Context, value: Boolean) {
         sp(ctx).edit().putBoolean("landscape", value).apply()

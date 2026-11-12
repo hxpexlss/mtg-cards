@@ -79,6 +79,20 @@ class TestWishlistApi(unittest.TestCase):
         self.assertFalse(item["any_print"])
         self.call(f"/api/wishlist/{item['id']}", "DELETE")
 
+    def test_c_add_into_deck(self):
+        st, d = self.call("/api/decks", "POST", {"name": "Ziel"})
+        did = d["deck"]["id"]
+        st, row = self.call("/api/cards", "POST", {"name": "Lurrus", "deck_id": did})
+        self.assertEqual(row["deck"], {"id": did, "name": "Ziel"})
+        st, res = self.call("/api/cards/batch", "POST", {"cards": [
+            {"name": "Lurrus", "deck_id": did}, {"name": "Sol Ring", "deck_id": did, "quantity": 2}]})
+        deck = self.call(f"/api/decks/{did}")[1]
+        self.assertEqual({c["name"]: c["quantity"] for c in deck["cards"]},
+                         {"Lurrus of the Dream-Den": 2, "Sol Ring": 2})
+        st, row = self.call("/api/cards", "POST", {"name": "Lurrus", "deck_id": 99999})
+        self.assertIsNone(row["deck"])                      # unbekanntes Deck: Karte trotzdem gespeichert
+        self.call(f"/api/decks/{did}", "DELETE")
+
     def test_z_export_contains_wishlist(self):
         db = self.srv.db
         self.call("/api/wishlist", "POST", {"name": "Kraum", "max_price_eur": 1})

@@ -14,6 +14,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
@@ -72,6 +75,10 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private lateinit var recentAdapter: RecentAdapter
     private lateinit var batchSwitch: MaterialSwitch
     private lateinit var proxySwitch: MaterialSwitch
+    private lateinit var modeInfo: TextView
+    private lateinit var menu: View
+    private lateinit var scrim: View
+    private var deckChoices: List<Pair<Long, String>> = listOf(0L to "Kein Deck")
     private lateinit var batchButton: Button
 
     private var camera: Camera? = null
@@ -118,6 +125,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         proxySwitch.setOnCheckedChangeListener { _, on ->
             Prefs.setProxyMode(requireContext(), on)
             status.text = if (on) "🅿 Proxy-Modus: gescannte Karten bekommen den Tag „Proxies“" else "Proxy-Modus aus"
+            refreshModeInfo()
         }
         batchButton = view.findViewById(R.id.btnBatch)
         batchSwitch.isChecked = BatchStore.isEnabled(requireContext())
@@ -125,6 +133,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             BatchStore.setEnabled(requireContext(), on)
             status.text = if (on) "Stapel-Modus: Karten werden gesammelt und am Ende gespeichert" else "Einzel-Modus"
             refreshBatchButton()
+            refreshModeInfo()
         }
         batchButton.setOnClickListener { startActivity(Intent(requireContext(), BatchActivity::class.java)) }
 
@@ -133,35 +142,18 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         recentList.adapter = recentAdapter
 
         autoSwitch.isChecked = Prefs.autoAdd(requireContext())
-        autoSwitch.setOnCheckedChangeListener { _, checked -> Prefs.setAutoAdd(requireContext(), checked) }
+        autoSwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setAutoAdd(requireContext(), checked)
+            refreshModeInfo()
+        }
+        setupMenu(view)   // nach den Schaltern, damit die Modus-Zeile stimmt
 
         view.findViewById<ImageButton>(R.id.btnTorch).setOnClickListener {
             torchOn = !torchOn
             camera?.cameraControl?.enableTorch(torchOn)
         }
         view.findViewById<Button>(R.id.btnManual).setOnClickListener { manualEntry() }
-        val langButton = view.findViewById<Button>(R.id.btnLang)
-        langButton.text = Languages.short(Prefs.scanLang(requireContext()))
-        langButton.setOnClickListener {
-            val items = Languages.all
-            val current = items.indexOfFirst { it.first == Prefs.scanLang(requireContext()) }.coerceAtLeast(0)
-            AlertDialog.Builder(requireContext())
-                .setTitle("Sprache der Karten")
-                .setSingleChoiceItems(items.map { it.second }.toTypedArray(), current) { d, which ->
-                    Prefs.setScanLang(requireContext(), items[which].first)
-                    langButton.text = Languages.short(items[which].first)
-                    status.text = "Kartensprache: ${items[which].second}"
-                    d.dismiss()
-                }
-                .show()
-        }
         overlay.landscape = Prefs.landscape(requireContext())
-        view.findViewById<ImageButton>(R.id.btnRotate).setOnClickListener {
-            overlay.landscape = !overlay.landscape
-            Prefs.setLandscape(requireContext(), overlay.landscape)
-            voter.reset()
-            status.text = if (overlay.landscape) "Querformat (z.B. Schlachten)" else "Hochformat"
-        }
         view.findViewById<Button>(R.id.btnMinus).setOnClickListener { setQty(quantity - 1) }
         view.findViewById<Button>(R.id.btnPlus).setOnClickListener { setQty(quantity + 1) }
         view.findViewById<Button>(R.id.btnDiscard).setOnClickListener { dismissResult() }
@@ -189,6 +181,128 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     }
 
     private val proxy get() = proxySwitch.isChecked
+
+    private val targetDeck get() = Prefs.scanDeckId(requireContext())
+
+    // ------------------------------------------------------------------ Seitenmenü
+    private fun setupMenu(view: View) {
+        val ctx = requireContext()
+        menu = view.findViewById(R.id.scanMenu)
+        scrim = view.findViewById(R.id.menuScrim)
+        modeInfo = view.findViewById(R.id.modeInfo)
+        view.findViewById<ImageButton>(R.id.btnMenu).setOnClickListener { openMenu() }
+        view.findViewById<ImageButton>(R.id.btnMenuClose).setOnClickListener { closeMenu() }
+        scrim.setOnClickListener { closeMenu() }
+
+        // Sprache
+        val langSpinner = view.findViewById<Spinner>(R.id.langSpinner)
+        langSpinner.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, Languages.all.map { it.second })
+        langSpinner.setSelection(Languages.all.indexOfFirst { it.first == Prefs.scanLang(ctx) }.coerceAtLeast(0), false)
+        langSpinner.onItemSelectedListener = simpleSelect { pos ->
+            Prefs.setScanLang(ctx, Languages.all[pos].first)
+            refreshModeInfo()
+        }
+
+        // Foil, Querformat, Ton
+        view.findViewById<MaterialSwitch>(R.id.foilDefault).apply {
+            isChecked = Prefs.defaultFoil(ctx)
+            foilCheck.isChecked = isChecked
+            setOnCheckedChangeListener { _, on ->
+                Prefs.setDefaultFoil(ctx, on)
+                foilCheck.isChecked = on
+                refreshModeInfo()
+            }
+        }
+        overlay.landscape = Prefs.landscape(ctx)
+        view.findViewById<MaterialSwitch>(R.id.landscapeMode).apply {
+            isChecked = overlay.landscape
+            setOnCheckedChangeListener { _, on ->
+                overlay.landscape = on
+                Prefs.setLandscape(ctx, on)
+                voter.reset()
+                refreshModeInfo()
+            }
+        }
+        view.findViewById<MaterialSwitch>(R.id.soundMode).apply {
+            isChecked = Prefs.sound(ctx)
+            setOnCheckedChangeListener { _, on -> Prefs.setSound(ctx, on) }
+        }
+
+        // Ziel-Deck
+        setDeckChoices(view, listOf(0L to "Kein Deck") +
+            (if (Prefs.scanDeckId(ctx) > 0) listOf(Prefs.scanDeckId(ctx) to Prefs.scanDeckName(ctx)) else emptyList()))
+        loadDecks(view)
+        refreshModeInfo()
+    }
+
+    private fun setDeckChoices(view: View, choices: List<Pair<Long, String>>) {
+        val ctx = requireContext()
+        deckChoices = choices
+        val spinner = view.findViewById<Spinner>(R.id.deckSpinner)
+        spinner.onItemSelectedListener = null
+        spinner.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, choices.map { it.second })
+        spinner.setSelection(choices.indexOfFirst { it.first == Prefs.scanDeckId(ctx) }.coerceAtLeast(0), false)
+        spinner.onItemSelectedListener = simpleSelect { pos ->
+            val (id, name) = deckChoices[pos]
+            Prefs.setScanDeck(ctx, id, if (id > 0) name else "")
+            refreshModeInfo()
+        }
+    }
+
+    private fun loadDecks(view: View) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val arr = Api.fromPrefs(requireContext()).decks().getJSONArray("decks")
+                val list = (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .sortedWith(compareBy({ it.optString("status") == "owned" }, { it.optString("name").lowercase() }))
+                    .map { it.optLong("id") to (it.optString("name") +
+                        if (it.optString("status") == "owned") " (Besitz)" else " (Bau)") }
+                val current = Prefs.scanDeckId(requireContext())
+                if (current > 0 && list.none { it.first == current }) Prefs.setScanDeck(requireContext(), 0L, "")
+                setDeckChoices(view, listOf(0L to "Kein Deck") + list)
+                refreshModeInfo()
+            } catch (_: ApiException) {
+                // offline: zuletzt gewähltes Deck bleibt im Menü
+            }
+        }
+    }
+
+    private fun simpleSelect(onSelect: (Int) -> Unit) = object : AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: AdapterView<*>?, v: View?, position: Int, id: Long) = onSelect(position)
+        override fun onNothingSelected(parent: AdapterView<*>?) {}
+    }
+
+    private fun openMenu() {
+        view?.let { loadDecks(it) }
+        scrim.visibility = View.VISIBLE
+        menu.visibility = View.VISIBLE
+        menu.translationX = menu.width.toFloat().takeIf { it > 0 } ?: 900f
+        menu.animate().translationX(0f).setDuration(180).start()
+    }
+
+    private fun closeMenu() {
+        menu.animate().translationX(menu.width.toFloat()).setDuration(160).withEndAction {
+            menu.visibility = View.GONE
+            scrim.visibility = View.GONE
+        }.start()
+    }
+
+    /** Kurze Zeile unter dem Status mit den aktiven Einstellungen. */
+    private fun refreshModeInfo() {
+        val ctx = context ?: return
+        if (!::modeInfo.isInitialized) return
+        val parts = buildList {
+            if (proxySwitch.isChecked) add("🅿 Proxy")
+            if (batchSwitch.isChecked) add("Stapel")
+            if (autoSwitch.isChecked && !batchSwitch.isChecked) add("Auto")
+            if (Prefs.defaultFoil(ctx)) add("Foil")
+            if (Prefs.scanDeckId(ctx) > 0) add("→ ${Prefs.scanDeckName(ctx).substringBeforeLast(" (")}")
+            Prefs.scanLang(ctx).takeIf { it != "auto" }?.let { add(it.uppercase()) }
+            if (Prefs.landscape(ctx)) add("Querformat")
+        }
+        modeInfo.text = parts.joinToString(" · ")
+        modeInfo.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
+    }
 
     override fun onResume() {
         super.onResume()
@@ -345,7 +459,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives, langFor(scan))
                 when {
                     batchSwitch.isChecked -> {
-                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy))
+                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy, targetDeck))
                         blockedName = CardTextParser.normalize(name)
                         overlay.active = false
                         delay(400L)
@@ -360,11 +474,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
                     // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
                     addToBatch(BatchItem(null, name, scan.setCode, scan.collectorNumber, 1, foilCheck.isChecked,
-                        null, null, null, langFor(scan), proxy))
+                        null, null, null, langFor(scan), proxy, targetDeck))
                     status.text = "Offline – „$name“ im Stapel (wird beim Speichern geprüft)"
                     delay(900L)
                 } else if (e.code == Api.UNREACHABLE) {
-                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan), proxy))
+                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan), proxy, targetDeck))
                     delay(900L)
                 } else {
                     feedback.error(overlay, sound)
@@ -415,11 +529,13 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         addButton.isEnabled = false
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val res = Api.fromPrefs(requireContext()).addCard(card.getString("scryfall_id"), qty, foil, proxyTags(proxy))
+                val res = Api.fromPrefs(requireContext()).addCard(card.getString("scryfall_id"), qty, foil, proxyTags(proxy), targetDeck)
                 ScanSession.added += qty
                 ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
                 feedback.success(overlay, sound)
-                status.text = "✓ ${if (res.optBoolean("proxy")) "🅿 " else ""}${res.optString("name")} – jetzt ${res.optInt("quantity")}×"
+                val deckName = res.optJSONObject("deck")?.optString("name")
+                status.text = "✓ ${if (res.optBoolean("proxy")) "🅿 " else ""}${res.optString("name")} – jetzt ${res.optInt("quantity")}×" +
+                    (deckName?.let { " → $it" } ?: "")
                 val wishes = res.optJSONArray("wish_fulfilled")
                 if (wishes != null && wishes.length() > 0) {
                     Toast.makeText(requireContext(), "★ Wunsch erfüllt: ${wishes.getJSONObject(0).optString("name")}",
@@ -431,7 +547,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             } catch (e: ApiException) {
                 if (e.code == Api.UNREACHABLE) {
                     queueOffline(PendingScan(card.optString("name"), card.optString("set_code"),
-                        card.optString("collector_number"), foil, qty, card.optString("lang").ifBlank { null }, proxy))
+                        card.optString("collector_number"), foil, qty, card.optString("lang").ifBlank { null }, proxy, targetDeck))
                     dismissResult()
                 } else {
                     feedback.error(overlay, sound)
@@ -446,6 +562,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
 
     private fun dismissResult() {
         panel.visibility = View.GONE
+        foilCheck.isChecked = Prefs.defaultFoil(requireContext())
         currentCard = null
         blockedName = lastCandidate
         overlay.active = false
@@ -469,7 +586,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                     continue
                 }
                 try {
-                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang, proxyTags(p.proxy))
+                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang, proxyTags(p.proxy), p.deckId)
                     sent += p.quantity
                     ScanSession.added += p.quantity
                     ScanSession.recent.removeAll { it.pending && it.name == p.name }

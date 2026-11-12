@@ -36,37 +36,6 @@
             android:textColor="#FFFFFF"
             android:textSize="14sp" />
 
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/autoAdd"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Auto"
-            android:textColor="#FFFFFF" />
-
-        <Button
-            android:id="@+id/btnLang"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="4dp"
-            android:background="@drawable/bg_status"
-            android:contentDescription="Kartensprache"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:padding="0dp"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <ImageButton
-            android:id="@+id/btnRotate"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="4dp"
-            android:background="@drawable/bg_status"
-            android:contentDescription="Hoch-/Querformat"
-            android:src="@drawable/ic_rotate" />
-
         <ImageButton
             android:id="@+id/btnTorch"
             android:layout_width="44dp"
@@ -75,7 +44,30 @@
             android:background="@drawable/bg_status"
             android:contentDescription="Licht"
             android:src="@drawable/ic_flash" />
+
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="4dp"
+            android:background="@drawable/bg_status"
+            android:contentDescription="Scan-Einstellungen"
+            android:src="@drawable/ic_menu_white" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/modeInfo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="66dp"
+        android:background="@drawable/bg_status"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:textColor="#FFD27A"
+        android:textSize="12sp"
+        android:visibility="gone" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -129,26 +121,6 @@
             android:layout_marginTop="4dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
-
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/proxyMode"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/bg_status"
-                android:paddingHorizontal="12dp"
-                android:text="Proxy"
-                android:textColor="#FFFFFF" />
-
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/batchMode"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="10dp"
-                android:background="@drawable/bg_status"
-                android:paddingHorizontal="12dp"
-                android:text="Stapel"
-                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnManual"
@@ -286,4 +258,114 @@
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
+
+    <!-- Seitenmenü mit allen Scan-Einstellungen -->
+    <View
+        android:id="@+id/menuScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/scanMenu"
+        android:layout_width="310dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="?attr/colorSurface"
+        android:elevation="12dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Scan-Einstellungen"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <ImageButton
+                    android:id="@+id/btnMenuClose"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Schließen"
+                    android:src="@drawable/ic_back" />
+            </LinearLayout>
+
+            <TextView
+                style="@style/ScanMenuHeader"
+                android:text="Ziel-Deck" />
+
+            <Spinner
+                android:id="@+id/deckSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp" />
+
+            <TextView
+                style="@style/ScanMenuHint"
+                android:text="Gescannte Karten kommen in die Sammlung und zusätzlich in dieses Deck." />
+
+            <TextView
+                style="@style/ScanMenuHeader"
+                android:text="Kartensprache" />
+
+            <Spinner
+                android:id="@+id/langSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp" />
+
+            <TextView
+                style="@style/ScanMenuHeader"
+                android:text="Hinzufügen" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/autoAdd"
+                style="@style/ScanMenuSwitch"
+                android:text="Automatisch hinzufügen (ohne Bestätigung)" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/batchMode"
+                style="@style/ScanMenuSwitch"
+                android:text="Stapel-Modus (erst sammeln, dann speichern)" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/proxyMode"
+                style="@style/ScanMenuSwitch"
+                android:text="Proxy (Tag „Proxies“)" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/foilDefault"
+                style="@style/ScanMenuSwitch"
+                android:text="Foil" />
+
+            <TextView
+                style="@style/ScanMenuHeader"
+                android:text="Kamera &amp; Rückmeldung" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/landscapeMode"
+                style="@style/ScanMenuSwitch"
+                android:text="Querformat-Rahmen (z.B. Schlachten)" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/soundMode"
+                style="@style/ScanMenuSwitch"
+                android:text="Ton beim Scannen" />
+        </LinearLayout>
+    </ScrollView>
 </FrameLayout>

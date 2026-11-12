@@ -376,6 +376,16 @@ def _add_one(h, data):
     row["owned"] = h.ctx.db.find_owned(row["scryfall_id"], row["oracle_id"])
     # Proxies erfüllen keine Wünsche
     row["wish_fulfilled"] = [] if row.get("proxy") else h.ctx.wishlist.fulfill(card, qty)
+    # Optional direkt in ein Deck (Ziel-Deck beim Scannen)
+    row["deck"] = None
+    deck_id = data.get("deck_id")
+    if deck_id:
+        try:
+            deck = h.ctx.decks.set_card(int(deck_id), card, qty, data.get("board") or "main", add=True)
+        except (TypeError, ValueError):
+            deck = None
+        if deck:
+            row["deck"] = {"id": deck["id"], "name": deck["name"]}
     return row, created
 
 

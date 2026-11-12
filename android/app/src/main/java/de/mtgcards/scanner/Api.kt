@@ -134,9 +134,11 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         return json("GET", "/api/lookup?$q")
     }
 
-    suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean, tags: List<String> = emptyList()): JSONObject =
+    suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean, tags: List<String> = emptyList(),
+                        deckId: Long = 0L): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("scryfall_id", scryfallId)
+            if (deckId > 0) put("deck_id", deckId)
             put("quantity", quantity)
             put("foil", foil)
             if (tags.isNotEmpty()) put("tags", org.json.JSONArray(tags))
@@ -144,9 +146,10 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     /** Hinzufügen per Name (+ optional Set/Nummer) – der Server schlägt bei Scryfall nach. */
     suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean,
-                          lang: String? = null, tags: List<String> = emptyList()): JSONObject =
+                          lang: String? = null, tags: List<String> = emptyList(), deckId: Long = 0L): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("name", name)
+            if (deckId > 0) put("deck_id", deckId)
             if (tags.isNotEmpty()) put("tags", org.json.JSONArray(tags))
             if (!lang.isNullOrBlank()) put("lang", lang)
             if (!setCode.isNullOrBlank()) put("set", setCode)

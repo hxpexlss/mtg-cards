@@ -6,4 +6,28 @@
         <item name="colorPrimaryContainer">@color/accent</item>
         <item name="colorOnPrimaryContainer">#FFFFFF</item>
     </style>
+
+    <style name="ScanMenuHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">18dp</item>
+        <item name="android:layout_marginBottom">2dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:alpha">0.7</item>
+    </style>
+
+    <style name="ScanMenuHint">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:alpha">0.7</item>
+    </style>
+
+    <style name="ScanMenuSwitch">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
 </resources>

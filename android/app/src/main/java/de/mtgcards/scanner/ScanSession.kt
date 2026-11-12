@@ -30,6 +30,7 @@ data class PendingScan(
     val name: String, val setCode: String?, val cn: String?, val foil: Boolean, val quantity: Int,
     val lang: String? = null,
     val proxy: Boolean = false,
+    val deckId: Long = 0L,
 )
 
 /** Offline-Warteschlange, gespeichert in den SharedPreferences (übersteht Neustarts). */
@@ -46,6 +47,7 @@ object PendingQueue {
                 o.optInt("quantity", 1),
                 o.optString("lang").ifBlank { null },
                 o.optBoolean("proxy"),
+                o.optLong("deck_id"),
             )
         }
     }
@@ -65,6 +67,7 @@ object PendingQueue {
                 put("quantity", p.quantity)
                 put("lang", p.lang ?: "")
                 put("proxy", p.proxy)
+                put("deck_id", p.deckId)
             })
         }
         Prefs.setPendingJson(ctx, arr.toString())

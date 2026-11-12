@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.8.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.9.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.8.0_all.deb
+sudo apt install ./mtg-cards-server_1.9.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -85,6 +85,10 @@ deaktivieren** („Nicht optimieren“/„Uneingeschränkt“) und in Tailscale 
   HTTPS (siehe unten). **Den Port nicht direkt ins Internet freigeben**.
 
 ## Scannen
+
+**Seitenmenü** (Symbol oben rechts) mit allen Scan-Einstellungen: **Ziel-Deck** (gescannte Karten kommen zusätzlich
+direkt in dieses Deck), Kartensprache, automatisch hinzufügen, Stapel-Modus, Proxy, Foil, Querformat-Rahmen und Ton.
+Unter dem Status zeigt eine Zeile die aktiven Einstellungen (z.B. `🅿 Proxy · Stapel · → Atraxa · DE`).
 
 Karte in den Rahmen halten, sodass der Name im violetten Feld liegt. Die Texterkennung (Google ML Kit) läuft
 offline auf dem Handy. Erkannt werden der Kartenname und – wenn lesbar – Set-Code und Sammlernummer unten links,
