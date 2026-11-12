@@ -83,6 +83,8 @@ jobs:
         with:
           path: out
           merge-multiple: true
+      - name: Release-Notes aus CHANGELOG.md
+        run: python3 .github/scripts/release_notes.py --version ${{ steps.ver.outputs.version }} --out release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
@@ -90,11 +92,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           make_latest: true
           overwrite_files: true
-          body: |
-            **Downloads**
-            - `mtg-cards-scanner.apk` – Android-App (Karten scannen, Sammlung durchsuchen)
-            - `mtg-cards-desktop_${{ steps.ver.outputs.version }}_all.deb` – Linux-Desktop: `sudo apt install ./mtg-cards-desktop_*.deb`
-            - `mtg-cards-server_${{ steps.ver.outputs.version }}_all.deb` – Ubuntu-Server: `sudo apt install ./mtg-cards-server_*.deb`, Token: `sudo mtg-cards-server --show-token`
-
-            Anleitung: siehe README.
+          body_path: release-notes.md
           files: out/*
+      - name: Release-Notes aller Versionen aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_notes.py --sync

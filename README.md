@@ -20,6 +20,8 @@ Eigene Tags (z.B. `Deck: Atraxa`, `Tauschen`) und Notizen können zusätzlich ve
 
 ## Download
 
+Was sich in welcher Version geändert hat: [CHANGELOG.md](CHANGELOG.md) (auch als Release-Notes auf GitHub).
+
 **Fertige Dateien: [GitHub-Releases](../../releases/latest)** (APK + beide .deb). Sie werden von GitHub Actions bei jedem Push automatisch gebaut und veröffentlicht; zusätzlich unter **Actions → Build → Artifacts**
 (`android-apk` und `deb-pakete`). Für einen Release mit Download-Links einen Tag pushen: `git tag v1.0.0 && git push --tags`.
 
