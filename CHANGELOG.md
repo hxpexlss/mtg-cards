@@ -67,7 +67,7 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 
 ### Behoben
 - **„Nicht autorisiert“** trotz richtigem Token, wenn die Handy-Tastatur ein Leerzeichen eingefügt hatte
-  (z.B. `T53Q-CY4G- 8KX6-R7K6`). Leerzeichen und Bindestriche im Token werden jetzt ignoriert.
+  (z.B. `ABCD-EFGH- JKLM-NPQR`). Leerzeichen und Bindestriche im Token werden jetzt ignoriert.
 - Token-Feld in der App ohne Autokorrektur.
 
 ## [1.6.0] – 2026-11-11
