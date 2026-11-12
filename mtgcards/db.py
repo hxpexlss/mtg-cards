@@ -88,6 +88,16 @@ SORTS = {
 }
 
 
+def tags_json(tags):
+    """Tags als JSON – Umlaute bleiben lesbar (nicht als \\uXXXX), damit Suche und Filter sie finden."""
+    return json.dumps(list(tags), ensure_ascii=False)
+
+
+def _like(term):
+    """LIKE-Muster für einen Suchbegriff; %, _ und \\ werden wörtlich gesucht (ESCAPE '\\')."""
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -138,7 +148,7 @@ class Database:
                 "SELECT id, tags FROM cards WHERE type_line LIKE 'Token%'").fetchall():
             tag_list = _as_list(tags)
             if "Token" not in tag_list:
-                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (json.dumps(tag_list + ["Token"]), cid))
+                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (tags_json(tag_list + ["Token"]), cid))
         self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('token_tag_v1', '1')")
 
     def _tag_emblems_once(self):
@@ -149,13 +159,22 @@ class Database:
                 "SELECT id, tags FROM cards WHERE type_line LIKE 'Emblem%'").fetchall():
             tag_list = _as_list(tags)
             if "Emblem" not in tag_list:
-                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (json.dumps(tag_list + ["Emblem"]), cid))
+                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (tags_json(tag_list + ["Emblem"]), cid))
         self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('emblem_tag_v1', '1')")
+
+    def _tags_utf8_once(self):
+        """Einmalig: Tags mit Umlauten lagen als \\uXXXX in der Datenbank und waren nicht filterbar."""
+        if self.conn.execute("SELECT value FROM meta WHERE key='tags_utf8_v1'").fetchone():
+            return
+        for cid, tags in self.conn.execute("SELECT id, tags FROM cards WHERE tags LIKE '%\\u%'").fetchall():
+            self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (tags_json(_as_list(tags)), cid))
+        self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('tags_utf8_v1', '1')")
 
     def _migrate(self):
         """Ältere Datenbanken: Spalte 'proxy' ergänzen (Proxies sind eigene Einträge)."""
         self._tag_tokens_once()
         self._tag_emblems_once()
+        self._tags_utf8_once()
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(cards)")}
         if "proxy" not in cols:
             self.conn.execute("ALTER TABLE cards ADD COLUMN proxy INTEGER NOT NULL DEFAULT 0")
@@ -216,7 +235,7 @@ class Database:
         values.update({
             "foil": 1 if foil else 0,
             "quantity": int(quantity),
-            "tags": json.dumps(tags),
+            "tags": tags_json(tags),
             "proxy": 1 if is_proxy_tags(tags) else 0,
             "notes": notes or "",
             "added_at": added_at or ts,
@@ -248,7 +267,7 @@ class Database:
                 new_notes = ex["notes"] or notes or ""
                 self.conn.execute(
                     "UPDATE cards SET quantity=quantity+?, tags=?, notes=?, updated_at=? WHERE id=?",
-                    (quantity, json.dumps(new_tags), new_notes, now_iso(), ex["id"]),
+                    (quantity, tags_json(new_tags), new_notes, now_iso(), ex["id"]),
                 )
                 card_id, created = ex["id"], False
             else:
@@ -267,7 +286,7 @@ class Database:
                 continue
             if k == "tags":
                 tag_list = merge_tags(_as_list(v))
-                v = json.dumps(tag_list)
+                v = tags_json(tag_list)
                 sets.append("proxy=?")
                 vals.append(1 if is_proxy_tags(tag_list) else 0)
             elif k == "foil":
@@ -308,7 +327,7 @@ class Database:
         qty = int(changes.get("quantity", src["quantity"]))
         tags = merge_tags(dst["tags"], _as_list(changes.get("tags", src["tags"])))
         self.conn.execute("UPDATE cards SET quantity=quantity+?, tags=?, updated_at=? WHERE id=?",
-                          (qty, json.dumps(tags), now_iso(), dst["id"]))
+                          (qty, tags_json(tags), now_iso(), dst["id"]))
         self.conn.execute("DELETE FROM cards WHERE id=?", (card_id,))
         self._bump()
         self.conn.commit()
@@ -325,7 +344,7 @@ class Database:
             sets = [f"{f}=?" for f in CARD_FIELDS]
             vals = [json.dumps(card.get(f) or []) if f == "keywords" else card.get(f) for f in CARD_FIELDS]
             sets += ["tags=?", "updated_at=?"]
-            vals += [json.dumps(tags), now_iso()]
+            vals += [tags_json(tags), now_iso()]
             self.conn.execute(f"UPDATE cards SET {', '.join(sets)} WHERE id=?", vals + [card_id])
             self._bump()
             self.conn.commit()
@@ -344,7 +363,7 @@ class Database:
             if dup:
                 tags = merge_tags(self.get(dup[0])["tags"], ex["tags"])
                 self.conn.execute("UPDATE cards SET quantity=quantity+?, tags=?, updated_at=? WHERE id=?",
-                                  (ex["quantity"], json.dumps(tags), now_iso(), dup[0]))
+                                  (ex["quantity"], tags_json(tags), now_iso(), dup[0]))
                 self.conn.execute("DELETE FROM cards WHERE id=?", (card_id,))
                 self.conn.commit()
                 card_id = dup[0]
@@ -405,16 +424,13 @@ class Database:
                          "WHERE proxy = 0 GROUP BY COALESCE(oracle_id, name) HAVING SUM(quantity) >= ?)")
             vals.append(dup_min)
         for term in (q or "").split():
-            like = f"%{term}%"
-            where.append("(name LIKE ? OR printed_name LIKE ? OR type_line LIKE ? OR oracle_text LIKE ?"
-                         " OR tags LIKE ? OR notes LIKE ?)")
+            like = _like(term)
+            where.append("(name LIKE ? ESCAPE '\\' OR printed_name LIKE ? ESCAPE '\\' OR type_line LIKE ? ESCAPE '\\'"
+                         " OR oracle_text LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')")
             vals += [like] * 6
-        if tag:
-            where.append("tags LIKE ?")
-            vals.append(f'%"{tag}"%')
         if type_:
-            where.append("type_line LIKE ?")
-            vals.append(f"%{type_}%")
+            where.append("type_line LIKE ? ESCAPE '\\'")
+            vals.append(_like(type_))
         if rarity:
             where.append("rarity = ?")
             vals.append(rarity.lower())
@@ -430,6 +446,11 @@ class Database:
         sql += " ORDER BY " + SORTS.get(sort, SORTS["name"])
         with self._lock:
             rows = [self._row(r) for r in self.conn.execute(sql, vals).fetchall()]
+
+        if tag:
+            # exakter Tag (ohne Groß-/Kleinschreibung) – auch mit Umlauten oder Sonderzeichen
+            wanted_tag = str(tag).strip().lower()
+            rows = [r for r in rows if any(str(t).lower() == wanted_tag for t in r["tags"])]
 
         ci = (ci or "").upper()
         if ci:
@@ -479,7 +500,7 @@ class Database:
             rows = self.conn.execute(
                 "SELECT id, collector_number, quantity, foil FROM cards WHERE set_code=? AND proxy=0", (set_code.upper(),))
             for cid, cn, qty, foil in rows:
-                o = out.setdefault(cn, {"quantity": 0, "foil": 0, "ids": []})
+                o = out.setdefault(cn or "", {"quantity": 0, "foil": 0, "ids": []})
                 o["quantity"] += qty
                 o["foil"] += qty if foil else 0
                 o["ids"].append(cid)

@@ -480,9 +480,13 @@ def export_decks(db):
     return out
 
 
-def import_decks(db, decks, replace=False):
-    """Decks aus einem JSON-Export wiederherstellen (ohne Scryfall-Abfragen)."""
-    store = DeckStore(db)
+def import_decks(db, decks, replace=False, _in_tx=False):
+    """Decks aus einem JSON-Export wiederherstellen (ohne Scryfall-Abfragen).
+
+    _in_tx=True: Teil einer laufenden Transaktion (kein eigenes Commit, Tabellen existieren bereits).
+    """
+    if not _in_tx:
+        DeckStore(db)
     count = 0
     with db._lock:
         if replace:
@@ -498,18 +502,23 @@ def import_decks(db, decks, replace=False):
                 "INSERT INTO decks(name, format, notes, status, created_at, updated_at) VALUES(?,?,?,?,?,?)",
                 (d["name"], d.get("format") or "commander", d.get("notes") or "", _status(d.get("status")),
                  d.get("created_at") or now_iso(), d.get("updated_at") or now_iso()))
+            existing.add(d["name"].lower())
             for c in d.get("cards") or []:
-                if not c.get("name"):
+                if not isinstance(c, dict) or not c.get("name"):
                     continue
+                try:
+                    qty = max(1, int(c.get("quantity") or 1))
+                except (TypeError, ValueError):
+                    qty = 1
                 db.conn.execute(
                     """INSERT OR REPLACE INTO deck_cards(deck_id, name, oracle_id, quantity, board, type_line,
                        mana_cost, cmc, color_identity, image_url, keywords) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                    (cur.lastrowid, c["name"], c.get("oracle_id"), int(c.get("quantity") or 1),
+                    (cur.lastrowid, c["name"], c.get("oracle_id"), qty,
                      c.get("board") if c.get("board") in BOARDS else "main", c.get("type_line"),
                      c.get("mana_cost"), c.get("cmc"), c.get("color_identity") or "", c.get("image_url"),
                      json.dumps(c.get("keywords") or [])))
             count += 1
         db._bump()
-        db.conn.commit()
-    del store
+        if not _in_tx:
+            db.conn.commit()
     return count

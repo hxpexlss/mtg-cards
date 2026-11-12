@@ -982,9 +982,13 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
 
     private fun addCard(card: JSONObject, qty: Int, foil: Boolean) {
         addButton.isEnabled = false
+        // Eine Kennung pro Tippen auf „Hinzufügen“: Kommt die Antwort nicht an und der Scan geht später über die
+        // Warteschlange erneut raus, erkennt der Server die Wiederholung und speichert die Karte nicht doppelt.
+        val requestId = Api.newRequestId()
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val res = Api.fromPrefs(requireContext()).addCard(card.getString("scryfall_id"), qty, foil, proxyTags(proxy), targetDeck)
+                val res = Api.fromPrefs(requireContext()).addCard(card.optString("scryfall_id"), qty, foil, proxyTags(proxy),
+                    targetDeck, requestId)
                 ScanSession.added += qty
                 ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
                 feedback.success(overlay, sound)
@@ -1002,7 +1006,8 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             } catch (e: ApiException) {
                 if (e.code == Api.UNREACHABLE) {
                     queueOffline(PendingScan(card.optString("name"), card.optString("set_code"),
-                        card.optString("collector_number"), foil, qty, card.optString("lang").ifBlank { null }, proxy, targetDeck))
+                        card.optString("collector_number"), foil, qty, card.optString("lang").ifBlank { null }, proxy, targetDeck,
+                        requestId))
                     dismissResult()
                 } else {
                     feedback.error(overlay, sound)
@@ -1031,33 +1036,36 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         syncing = true
         viewLifecycleOwner.lifecycleScope.launch {
             val api = Api.fromPrefs(ctx)
-            val remaining = mutableListOf<PendingScan>()
             val failed = mutableListOf<String>()
             var sent = 0
             var offline = false
-            for (p in PendingQueue.all(ctx)) {
-                if (offline) {
-                    remaining += p
-                    continue
-                }
-                try {
-                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang, proxyTags(p.proxy), p.deckId)
-                    sent += p.quantity
-                    ScanSession.added += p.quantity
-                    ScanSession.recent.removeAll { it.pending && it.name == p.name }
-                    ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
-                } catch (e: ApiException) {
-                    if (e.code == Api.UNREACHABLE || e.code == Api.NOT_CONFIGURED || e.code == 401 || e.code >= 500) {
-                        offline = true
-                        remaining += p
-                    } else {
-                        failed += p.name   // z.B. 404: Name falsch erkannt
+            // Jeder gesendete Scan wird sofort aus der gespeicherten Warteschlange entfernt. Wird das Senden
+            // unterbrochen (Tab-Wechsel, App geschlossen), bleibt nur der Rest stehen – nichts geht doppelt raus.
+            try {
+                for (p in PendingQueue.all(ctx)) {
+                    if (offline) break
+                    try {
+                        val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang, proxyTags(p.proxy), p.deckId,
+                            p.requestId)
+                        PendingQueue.remove(ctx, p)
+                        sent += p.quantity
+                        ScanSession.added += p.quantity
                         ScanSession.recent.removeAll { it.pending && it.name == p.name }
+                        ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
+                    } catch (e: ApiException) {
+                        // Verbindungs-, Zertifikats-, Anmelde- und Serverfehler: Scan behalten und später erneut senden
+                        if (e.code <= 0 || e.code == 401 || e.code >= 500) {
+                            offline = true
+                        } else {
+                            failed += p.name   // z.B. 404: Name falsch erkannt
+                            PendingQueue.remove(ctx, p)
+                            ScanSession.recent.removeAll { it.pending && it.name == p.name }
+                        }
                     }
                 }
+            } finally {
+                syncing = false
             }
-            PendingQueue.save(ctx, remaining)
-            syncing = false
             if (view == null) return@launch
             refreshSessionViews()
             if (sent > 0) Toast.makeText(ctx, "$sent Karten aus der Warteschlange gesendet", Toast.LENGTH_SHORT).show()

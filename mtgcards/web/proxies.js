@@ -10,7 +10,7 @@ function openProxyDialog({ title, url, ids, info }) {
     document.body.appendChild(dlg);
   }
   dlg.innerHTML = `<form method="dialog" class="modal-body" id="proxy-form">
-    <header><h2>${esc(title)}</h2><button class="x" value="cancel" formnovalidate>×</button></header>
+    <header><h2>${esc(title)}</h2><button type="button" class="x" data-close>×</button></header>
     <p class="muted">${esc(info)} · 9 Karten pro Seite in Originalgröße (63,5 × 88,9 mm), passend für Standard-Sleeves.</p>
     <div class="row">
       <label>Papier <select id="px-paper"><option value="a4">A4</option><option value="letter">US Letter</option></select></label>
@@ -22,12 +22,12 @@ function openProxyDialog({ title, url, ids, info }) {
     <p class="muted small">Beim Drucken <b>„Tatsächliche Größe“ / 100 %</b> wählen (nicht „An Seite anpassen“).
       Doppelseitige Karten erhalten beide Seiten. Nur für Playtests und den privaten Gebrauch.</p>
     <footer><span class="spacer"></span>
-      <button class="btn" value="cancel" formnovalidate>Abbrechen</button>
+      <button type="button" class="btn" data-close>Abbrechen</button>
       <button class="btn primary" value="default" id="px-go">PDF erstellen</button></footer>
   </form>`;
+  $$("[data-close]", dlg).forEach((b) => { b.onclick = () => dlg.close(); });
   $("#proxy-form", dlg).addEventListener("submit", (ev) => {
     ev.preventDefault();
-    if (ev.submitter && ev.submitter.value === "cancel") { dlg.close(); return; }
     const p = new URLSearchParams({ paper: $("#px-paper").value, gap: $("#px-gap").value,
       cut: $("#px-cut").checked ? "1" : "0", token: state.token || "" });
     if ($("#px-copies").value) p.set("copies", $("#px-copies").value);

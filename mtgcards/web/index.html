@@ -91,6 +91,7 @@
       </div>
     </div>
     <div id="results" class="grid"></div>
+    <div id="more" class="more hidden"><button class="btn" id="btn-more"></button></div>
     <div id="empty" class="empty hidden">
       <h2>Noch keine Karten</h2>
       <p>Scanne Karten mit der Handy-App oder füge sie hier mit <b>＋ Karte</b> per Name hinzu.</p>
@@ -130,7 +131,7 @@
 <!-- Deck anlegen / Liste importieren -->
 <dialog id="dlg-deck" class="modal">
   <form method="dialog" class="modal-body" id="deck-form">
-    <header><h2 id="deck-form-title">Neues Deck</h2><button class="x" value="cancel" formnovalidate>×</button></header>
+    <header><h2 id="deck-form-title">Neues Deck</h2><button type="button" class="x" data-close>×</button></header>
     <label id="deck-name-wrap">Name <input id="deck-name" placeholder="z.B. Atraxa Superfriends"></label>
     <label id="deck-status-wrap">Status
       <select id="deck-status">
@@ -141,7 +142,7 @@
       <textarea id="deck-list-text" rows="12" placeholder="Commander&#10;1 Atraxa, Praetors' Voice&#10;&#10;Deck&#10;1 Sol Ring&#10;1 Arcane Signet&#10;..."></textarea></label>
     <label class="check" id="deck-replace-wrap"><input type="checkbox" id="deck-replace"> vorhandene Karten im Deck ersetzen</label>
     <footer><span class="spacer"></span>
-      <button class="btn" value="cancel" formnovalidate>Abbrechen</button>
+      <button type="button" class="btn" data-close>Abbrechen</button>
       <button class="btn primary" id="deck-save" value="default">Speichern</button></footer>
   </form>
 </dialog>
@@ -149,7 +150,7 @@
 <!-- Karte hinzufügen -->
 <dialog id="dlg-add" class="modal">
   <form method="dialog" class="modal-body" id="add-form" autocomplete="off">
-    <header><h2>Karte hinzufügen</h2><button class="x" value="cancel" formnovalidate>×</button></header>
+    <header><h2>Karte hinzufügen</h2><button type="button" class="x" data-close>×</button></header>
     <div class="add-grid">
       <div>
         <label>Kartenname (Englisch oder z.B. Deutsch)
@@ -183,7 +184,7 @@
     <footer>
       <label class="check"><input type="checkbox" id="add-keep" checked> Dialog offen lassen</label>
       <span class="spacer"></span>
-      <button class="btn" value="cancel" formnovalidate>Schließen</button>
+      <button type="button" class="btn" data-close>Schließen</button>
       <button class="btn primary" id="add-submit" value="default">Hinzufügen</button>
     </footer>
   </form>

@@ -111,5 +111,5 @@ class FakeScryfall:
     def autocomplete(self, q):
         return [c["name"] for c in ALL if q.lower() in c["name"].lower() and c["lang"] == "en"]
 
-    def prints(self, name):
+    def prints(self, name, lang=None, max_age=None):
         return [c for c in ALL if c["name"].lower() == name.lower()]

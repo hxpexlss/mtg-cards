@@ -4,6 +4,48 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [2.0.0] – 2026-11-12
+
+Fehlerkorrekturen nach einer kompletten Durchsicht von Server, Weboberfläche und App. Das Datenbank-Format bleibt
+gleich – Update wie gewohnt, Datenbank und Token bleiben erhalten. **Server/Desktop und App zusammen aktualisieren**,
+damit der Schutz vor doppelt gespeicherten Scans greift.
+
+### Behoben – Datenverlust und falsche Daten
+- **Import „Ersetzen“ konnte die Sammlung löschen:** Bei unbekannten CSV-Spalten, einer leeren Datei oder wenn
+  Scryfall nicht erreichbar war, wurde die Sammlung geleert und nichts importiert. Jetzt wird die Datei erst komplett
+  gelesen und nachgeschlagen; kann nicht alles übernommen werden, bricht „Ersetzen“ ab und die Sammlung bleibt
+  unverändert. Karten, Decks und Wunschliste werden in einem Schritt gespeichert (alles oder nichts).
+- **Falsche Karte bei „Dialog offen lassen“ (PC):** Wer nach dem Hinzufügen einen neuen Namen tippte und direkt auf
+  „Hinzufügen“ klickte, speicherte die vorherige Karte noch einmal. Vorschau und Druck-Auswahl werden jetzt beim
+  Tippen verworfen.
+- **Doppelte Karten aus der App:** Kam die Antwort des Servers nicht an (Timeout, Funkloch) oder wurde beim Senden
+  der Warteschlange der Tab gewechselt, gingen schon gespeicherte Scans erneut raus. Jede Speicher-Anfrage trägt
+  jetzt eine Kennung; der Server führt sie nur einmal aus. Gesendete Scans verlassen die Warteschlange sofort.
+  Auch ein Zertifikatsfehler verwirft die Warteschlange nicht mehr.
+- **Preise bis zu 3 Tage alt:** „Aktualisieren“ an einer Karte und die Preise der Wunschliste kamen aus dem
+  Scryfall-Zwischenspeicher – der Preis-Alarm konnte sich verspäten. Beides lädt jetzt aktuelle Preise. Bei Karten
+  mit sehr vielen Drucken werden alle Drucke berücksichtigt (günstigster Druck).
+
+### Behoben – Bedienung
+- **Enter schloss „Karte hinzufügen“ und „Neues Deck“**, ohne zu speichern. Enter speichert jetzt.
+- **Tags mit Umlauten** (z.B. „Tauschbörse“) ließen sich nicht filtern oder suchen. Vorhandene Tags werden beim
+  Update automatisch repariert. Der Tag-Filter trifft jetzt genau den Tag (kein Teiltreffer), `%` und `_` in der
+  Suche werden wörtlich genommen.
+- **Deck mit nicht lesbarer Liste:** Es kam ein interner Fehler und das leere Deck blieb trotzdem stehen. Jetzt
+  gibt es eine klare Meldung und kein Deck; ebenso, wenn Scryfall beim Anlegen nicht erreichbar ist.
+- **Companion fehlte** bei „Fehlende → Wunschliste“ und im Proxy-PDF, obwohl er als fehlend gezählt wurde.
+- **Große Sammlungen:** Die Weboberfläche zeigte höchstens 2000 Einträge. Jetzt gibt es „Weitere laden“; die App
+  weist darauf hin, wenn nur die ersten 1000 Treffer angezeigt werden.
+- Der Import blockiert den Server nicht mehr, während bei Scryfall nachgeschlagen wird.
+
+### Behoben – Robustheit und Sicherheit
+- Ungültige Eingaben (z.B. `limit=abc`, Anzahl „x“) liefern eine verständliche Meldung statt „Interner Fehler“.
+- Die Editions-Übersicht stürzte ab, wenn eine importierte Karte keine Sammlernummer hatte.
+- Manakosten und Farbidentität aus einer präparierten Importdatei konnten HTML in die Weboberfläche einschleusen.
+- Bei geändertem Server-Zertifikat zeigte der PC einen falschen Fingerabdruck in der Fehlermeldung.
+- App: Antwortet unter der Adresse kein MTG-Cards-Server (z.B. WLAN-Anmeldeseite), gibt es eine Meldung statt
+  eines Absturzes.
+
 ## [1.12.0] – 2026-11-12
 
 ### Neu

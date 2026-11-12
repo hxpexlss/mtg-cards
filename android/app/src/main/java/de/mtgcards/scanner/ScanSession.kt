@@ -31,6 +31,8 @@ data class PendingScan(
     val lang: String? = null,
     val proxy: Boolean = false,
     val deckId: Long = 0L,
+    /** Kennung der Speicher-Anfrage: Wird der Scan erneut gesendet, legt der Server die Karte nicht doppelt an. */
+    val requestId: String = Api.newRequestId(),
 )
 
 /** Offline-Warteschlange, gespeichert in den SharedPreferences (übersteht Neustarts). */
@@ -48,6 +50,7 @@ object PendingQueue {
                 o.optString("lang").ifBlank { null },
                 o.optBoolean("proxy"),
                 o.optLong("deck_id"),
+                o.optString("request_id").ifBlank { Api.newRequestId() },
             )
         }
     }
@@ -55,6 +58,17 @@ object PendingQueue {
     fun size(ctx: Context) = all(ctx).size
 
     fun add(ctx: Context, scan: PendingScan) = save(ctx, all(ctx) + scan)
+
+    /** Entfernt genau diesen Scan (sofort gespeichert, damit nach einem Abbruch nichts doppelt gesendet wird). */
+    fun remove(ctx: Context, scan: PendingScan) {
+        val list = all(ctx).toMutableList()
+        val i = list.indexOfFirst { it.requestId == scan.requestId }.takeIf { it >= 0 }
+            ?: list.indexOfFirst { it.copy(requestId = scan.requestId) == scan }
+        if (i >= 0) {
+            list.removeAt(i)
+            save(ctx, list)
+        }
+    }
 
     fun save(ctx: Context, list: List<PendingScan>) {
         val arr = JSONArray()
@@ -68,6 +82,7 @@ object PendingQueue {
                 put("lang", p.lang ?: "")
                 put("proxy", p.proxy)
                 put("deck_id", p.deckId)
+                put("request_id", p.requestId)
             })
         }
         Prefs.setPendingJson(ctx, arr.toString())

@@ -86,7 +86,32 @@ object BatchStore {
     fun save(ctx: Context, items: List<BatchItem>) {
         val arr = JSONArray()
         items.forEach { arr.put(it.toJson()) }
-        sp(ctx).edit().putString("batch", arr.toString()).apply()
+        val e = sp(ctx).edit().putString("batch", arr.toString())
+        if (items.isEmpty()) e.remove("batch_session")     // leerer Stapel = nächster Stapel ist ein neuer
+        e.apply()
+    }
+
+    /** Kennung des aktuellen Stapels (bleibt gleich, bis er gespeichert oder geleert wurde). */
+    private fun sessionId(ctx: Context): String {
+        val cur = sp(ctx).getString("batch_session", "") ?: ""
+        if (cur.isNotBlank()) return cur
+        val fresh = Api.newRequestId()
+        sp(ctx).edit().putString("batch_session", fresh).apply()
+        return fresh
+    }
+
+    /** Nach erfolgreichem Speichern: der Rest (nicht gefundene Karten) zählt als neuer Stapel. */
+    fun newSession(ctx: Context) = sp(ctx).edit().remove("batch_session").apply()
+
+    /**
+     * Kennung für „diesen Stapel mit genau diesem Inhalt speichern“. Wird dieselbe Anfrage wiederholt, weil die
+     * Antwort des Servers nicht ankam, speichert der Server die Karten nicht noch einmal.
+     */
+    fun requestId(ctx: Context, request: JSONArray): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(request.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "${sessionId(ctx)}:$digest"
     }
 
     /** Fügt hinzu; gleiche Karte (gleiche Foil-Art) erhöht die Anzahl. Gibt die neue Anzahl zurück. */

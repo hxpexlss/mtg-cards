@@ -274,7 +274,6 @@ function openDeckForm(mode) {
 
 async function submitDeckForm(ev) {
   ev.preventDefault();
-  if (ev.submitter && ev.submitter.value === "cancel") return $("#dlg-deck").close();
   const text = $("#deck-list-text").value;
   const btn = $("#deck-save");
   btn.disabled = true;

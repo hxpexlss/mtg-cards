@@ -91,7 +91,7 @@ class BatchActivity : AppCompatActivity() {
             try {
                 val req = JSONArray()
                 items.forEach { req.put(it.toRequest()) }
-                val res = Api.fromPrefs(this@BatchActivity).addBatch(req)
+                val res = Api.fromPrefs(this@BatchActivity).addBatch(req, BatchStore.requestId(this@BatchActivity, req))
                 val errors = res.optJSONArray("errors") ?: JSONArray()
                 val failedIdx = (0 until errors.length()).map { errors.getJSONObject(it).optInt("index") }.toSet()
                 val failed = items.filterIndexed { i, _ -> i in failedIdx }
@@ -111,6 +111,7 @@ class BatchActivity : AppCompatActivity() {
                 items.clear()
                 items.addAll(failed)
                 adapter.notifyDataSetChanged()
+                BatchStore.newSession(this@BatchActivity)
                 persist()
                 AlertDialog.Builder(this@BatchActivity)
                     .setTitle(if (failed.isEmpty()) "✓ Gespeichert" else "Teilweise gespeichert")
@@ -120,7 +121,8 @@ class BatchActivity : AppCompatActivity() {
             } catch (e: ApiException) {
                 AlertDialog.Builder(this@BatchActivity)
                     .setTitle("Nicht gespeichert")
-                    .setMessage("${e.message}\n\nDer Stapel bleibt erhalten – später erneut versuchen.")
+                    .setMessage("${e.message}\n\nDer Stapel bleibt erhalten – einfach erneut auf Speichern tippen. " +
+                        "Karten, die der Server schon gespeichert hat, werden dabei nicht doppelt angelegt.")
                     .setPositiveButton("OK", null)
                     .show()
                 updateSummary()
