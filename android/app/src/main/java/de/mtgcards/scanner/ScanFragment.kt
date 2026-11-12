@@ -1,6 +1,11 @@
 package de.mtgcards.scanner
 
 import android.Manifest
+import androidx.core.widget.doAfterTextChanged
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.core.UseCaseGroup
+import android.util.Size
+import android.graphics.Rect
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -79,6 +84,12 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private lateinit var menu: View
     private lateinit var scrim: View
     private var deckChoices: List<Pair<Long, String>> = listOf(0L to "Kein Deck")
+    @Volatile private var viewportBound = false
+    private val setVotes = mutableListOf<String>()
+    private val cnVotes = mutableListOf<String>()
+    private val langVotes = mutableListOf<String>()
+    private var waitFrames = 0
+    private var lastCode: String? = null
     private lateinit var batchButton: Button
 
     private var camera: Camera? = null
@@ -157,6 +168,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         view.findViewById<Button>(R.id.btnMinus).setOnClickListener { setQty(quantity - 1) }
         view.findViewById<Button>(R.id.btnPlus).setOnClickListener { setQty(quantity + 1) }
         view.findViewById<Button>(R.id.btnDiscard).setOnClickListener { dismissResult() }
+        view.findViewById<Button>(R.id.btnPrint).setOnClickListener {
+            val c = currentCard ?: return@setOnClickListener
+            PrintPicker.show(requireContext(), viewLifecycleOwner.lifecycleScope, c.optString("name"),
+                c.optString("lang")) { picked -> showResult(picked) }
+        }
         addButton.setOnClickListener { currentCard?.let { addCard(it, quantity, foilCheck.isChecked) } }
         pendingView.setOnClickListener { syncPending(manual = true) }
 
@@ -215,6 +231,26 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         }
         overlay.landscape = Prefs.landscape(ctx)
         val guide = this.overlay   // in apply{} wäre "overlay" die View-Eigenschaft des Schalters
+        guide.codeMode = Prefs.codeMode(ctx)
+        view.findViewById<MaterialSwitch>(R.id.codeMode).apply {
+            isChecked = guide.codeMode
+            setOnCheckedChangeListener { _, on ->
+                guide.codeMode = on
+                Prefs.setCodeMode(ctx, on)
+                voter.reset()
+                resetVotes()
+                lastCode = null
+                status.text = if (on) "Code-Modus: unteren Kartenrand in den Streifen halten" else "Namens-Modus"
+                refreshModeInfo()
+            }
+        }
+        view.findViewById<EditText>(R.id.fixedSet).apply {
+            setText(Prefs.fixedSet(ctx))
+            doAfterTextChanged { t ->
+                Prefs.setFixedSet(ctx, t?.toString() ?: "")
+                refreshModeInfo()
+            }
+        }
         view.findViewById<MaterialSwitch>(R.id.landscapeMode).apply {
             isChecked = guide.landscape
             setOnCheckedChangeListener { _, on ->
@@ -300,6 +336,9 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             if (Prefs.scanDeckId(ctx) > 0) add("→ ${Prefs.scanDeckName(ctx).substringBeforeLast(" (")}")
             Prefs.scanLang(ctx).takeIf { it != "auto" }?.let { add(it.uppercase()) }
             if (Prefs.landscape(ctx)) add("Querformat")
+            if (Prefs.codeMode(ctx)) add("Code-Modus")
+            else (Prefs.fixedSet(ctx).ifBlank { null }?.let { "Edition $it (fest)" }
+                ?: Prefs.lastSet(ctx).ifBlank { null }?.let { "Edition $it" })?.let { add(it) }
         }
         modeInfo.text = parts.joinToString(" · ")
         modeInfo.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
@@ -317,11 +356,13 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         batchButton.text = "✓ Stapel abschließen – $n Karten · ${euro(BatchStore.value(ctx))}"
     }
 
-    private fun addToBatch(item: BatchItem) {
+    private fun addToBatch(item: BatchItem, card: JSONObject? = null) {
         val qty = BatchStore.add(requireContext(), item)
         feedback.success(overlay, sound)
         val price = item.unitPrice?.let { " · ${euro(it)}" } ?: ""
-        status.text = "＋ ${item.name}$price" + if (qty > 1) " (jetzt ${qty}×)" else ""
+        val where = item.setCode?.let { " · $it #${item.cn}" } ?: ""
+        val sure = card?.let { PrintPicker.matchText(it).take(1).let { m -> if (m.isNotBlank()) " $m" else "" } } ?: ""
+        status.text = "＋ ${item.name.ifBlank { where.trim(' ', '·') }}$where$price$sure" + if (qty > 1) " (jetzt ${qty}×)" else ""
         refreshBatchButton()
     }
 
@@ -344,16 +385,31 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             val selector = ResolutionSelector.Builder()
                 .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
                 .build()
+            // Texterkennung in Full-HD: die kleine Zeile unten (Set-Code, Nummer) ist sonst kaum lesbar
+            val analysisSelector = ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(ResolutionStrategy(Size(1920, 1080),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                .build()
             val preview = Preview.Builder().setResolutionSelector(selector).build()
             preview.setSurfaceProvider(previewView.surfaceProvider)
             val analysis = ImageAnalysis.Builder()
-                .setResolutionSelector(selector)
+                .setResolutionSelector(analysisSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
             analysis.setAnalyzer(executor) { proxy -> analyze(proxy) }
             try {
                 provider.unbindAll()
-                camera = provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                val viewPort = previewView.viewPort
+                camera = if (viewPort != null) {
+                    // gleicher sichtbarer Ausschnitt für Vorschau und Analyse -> exakte Rahmen-Umrechnung
+                    val group = UseCaseGroup.Builder().setViewPort(viewPort).addUseCase(preview).addUseCase(analysis).build()
+                    viewportBound = true
+                    provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, group)
+                } else {
+                    viewportBound = false
+                    provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                }
             } catch (e: Exception) {
                 status.text = "Kamera konnte nicht gestartet werden: ${e.message}"
             }
@@ -395,8 +451,9 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         val rot = proxy.imageInfo.rotationDegrees
         val iw = if (rot % 180 == 0) proxy.width else proxy.height
         val ih = if (rot % 180 == 0) proxy.height else proxy.width
+        val crop = if (viewportBound) uprightCrop(proxy.cropRect, proxy.width, proxy.height, rot) else null
         recognizer.process(InputImage.fromMediaImage(media, rot))
-            .addOnSuccessListener { text -> onText(text, iw, ih) }
+            .addOnSuccessListener { text -> onText(text, iw, ih, crop) }
             .addOnCompleteListener { proxy.close() }
     }
 
@@ -408,14 +465,45 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         return Region((r.left + dx) / scale, (r.top + dy) / scale, (r.right + dx) / scale, (r.bottom + dy) / scale)
     }
 
+    /** Sichtbarer Bildausschnitt (cropRect) in aufrechte Bildkoordinaten drehen (wie ML Kit sie liefert). */
+    private fun uprightCrop(c: Rect, w: Int, h: Int, rot: Int): RectF = when (rot) {
+        90 -> RectF((h - c.bottom).toFloat(), c.left.toFloat(), (h - c.top).toFloat(), c.right.toFloat())
+        180 -> RectF((w - c.right).toFloat(), (h - c.bottom).toFloat(), (w - c.left).toFloat(), (h - c.top).toFloat())
+        270 -> RectF(c.top.toFloat(), (w - c.right).toFloat(), c.bottom.toFloat(), (w - c.left).toFloat())
+        else -> RectF(c)
+    }
+
+    /** Rahmen (View-Koordinaten) linear auf den sichtbaren Bildausschnitt abbilden. */
+    private fun toCropRegion(r: RectF, vw: Float, vh: Float, crop: RectF): Region {
+        val sx = crop.width() / vw
+        val sy = crop.height() / vh
+        return Region(crop.left + r.left * sx, crop.top + r.top * sy, crop.left + r.right * sx, crop.top + r.bottom * sy)
+    }
+
+    private fun mostCommon(list: List<String>): String? = list.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+
+    private fun resetVotes() {
+        setVotes.clear()
+        cnVotes.clear()
+        langVotes.clear()
+        waitFrames = 0
+    }
+
     private fun isBlocked(key: String) = blockedName?.let { similarity(it, key) >= 0.8 } ?: false
 
-    private fun onText(text: Text, iw: Int, ih: Int) {
+    private fun onText(text: Text, iw: Int, ih: Int, crop: RectF?) {
         if (paused || !isAdded || view == null) return
         val rect = overlay.cardRect ?: return
-        val region = toImageRegion(rect, overlay.width.toFloat(), overlay.height.toFloat(), iw.toFloat(), ih.toFloat())
+        val vw = overlay.width.toFloat()
+        val vh = overlay.height.toFloat()
+        val region = crop?.let { toCropRegion(rect, vw, vh, it) }
+            ?: toImageRegion(rect, vw, vh, iw.toFloat(), ih.toFloat())
         val lines = text.textBlocks.flatMap { it.lines }.mapNotNull { l ->
             l.boundingBox?.let { b -> OcrLine(l.text, b.left, b.top, b.right, b.bottom) }
+        }
+        if (overlay.codeMode) {
+            onCodeText(lines, region)
+            return
         }
         val res = CardTextParser.parse(lines, region)
         val name = res.name
@@ -423,6 +511,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             lastCandidate = null
             blockedName = null
             voter.reset()
+            resetVotes()
             overlay.active = false
             status.text = "Karte in den Rahmen halten – Name im violetten Feld"
             return
@@ -433,14 +522,55 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             return
         }
         overlay.active = true
+        if (lastCandidate != null && similarity(lastCandidate!!, key) < 0.8) resetVotes()   // andere Karte
         lastCandidate = key
+        // Set-Code/Nummer über mehrere Bilder sammeln – ein einzelner Lesefehler kippt das Ergebnis nicht
+        res.setCode?.let { setVotes += it }
+        res.collectorNumber?.let { cnVotes += it }
+        res.lang?.let { langVotes += it }
         if (!voter.offer(key)) {
             status.text = "Erkenne: $name …"
             return
         }
+        if ((setVotes.isEmpty() || cnVotes.isEmpty()) && waitFrames < 3) {
+            waitFrames++      // kurz weiterlesen, ob die untere Zeile noch lesbar wird
+            status.text = "Erkenne: $name – lese Set-Code …"
+            return
+        }
         voter.reset()
         feedback.found(overlay)
-        lookup(res.copy(name = name))
+        val scan = res.copy(name = name, setCode = mostCommon(setVotes) ?: res.setCode,
+            collectorNumber = mostCommon(cnVotes) ?: res.collectorNumber, lang = mostCommon(langVotes) ?: res.lang)
+        resetVotes()
+        lookup(scan)
+    }
+
+    /** Code-Modus: nur Set-Code + Sammlernummer vom unteren Rand. */
+    private fun onCodeText(lines: List<OcrLine>, strip: Region) {
+        val r = CardTextParser.parseCode(lines, strip)
+        if (r.setCode == null || r.collectorNumber == null) {
+            lastCode = null
+            blockedName = null
+            overlay.active = false
+            status.text = if (r.setCode != null || r.collectorNumber != null)
+                "Lese … ${r.setCode ?: "?"} #${r.collectorNumber ?: "?"}"
+            else "Unteren Kartenrand in den Streifen halten (z.B. „0077“ und „FDN • DE“)"
+            return
+        }
+        val key = "${r.setCode}|${r.collectorNumber}"
+        if (key == blockedName) {
+            status.text = "✓ Nächste Karte – unteren Rand in den Streifen halten"
+            return
+        }
+        overlay.active = true
+        if (key != lastCode) {          // zweimal genau gleich gelesen -> nachschlagen
+            lastCode = key
+            status.text = "Lese ${r.setCode} #${r.collectorNumber} …"
+            return
+        }
+        lastCode = null
+        feedback.found(overlay)
+        lookup(ScanResult(null, r.setCode, r.collectorNumber, emptyList(), r.lang))
     }
 
     // ------------------------------------------------------------------ Nachschlagen / Hinzufügen
@@ -451,17 +581,24 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     }
 
     private fun lookup(scan: ScanResult) {
-        val name = scan.name ?: return
+        val codeOnly = scan.name == null
+        if (codeOnly && (scan.setCode == null || scan.collectorNumber == null)) return
+        val name = scan.name ?: ""
+        val label = scan.name ?: "${scan.setCode} #${scan.collectorNumber}"
+        val blockKey = scan.name?.let { CardTextParser.normalize(it) } ?: "${scan.setCode}|${scan.collectorNumber}"
+        val preferSet = if (codeOnly) null else Prefs.fixedSet(requireContext()).ifBlank { Prefs.lastSet(requireContext()) }
         paused = true
         currentScan = scan
-        status.text = "Suche „$name“ …"
+        status.text = "Suche „$label“ …"
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives, langFor(scan))
+                val card = Api.fromPrefs(requireContext()).lookup(scan.name, scan.setCode, scan.collectorNumber,
+                    scan.alternatives, langFor(scan), preferSet = preferSet)
+                rememberSet(card, codeOnly)
                 when {
                     batchSwitch.isChecked -> {
-                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy, targetDeck))
-                        blockedName = CardTextParser.normalize(name)
+                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy, targetDeck), card)
+                        blockedName = blockKey
                         overlay.active = false
                         delay(400L)
                         paused = false
@@ -470,20 +607,21 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                     else -> showResult(card)
                 }
             } catch (e: ApiException) {
-                blockedName = CardTextParser.normalize(name)
+                blockedName = blockKey
                 overlay.active = false
                 if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
                     // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
                     addToBatch(BatchItem(null, name, scan.setCode, scan.collectorNumber, 1, foilCheck.isChecked,
                         null, null, null, langFor(scan), proxy, targetDeck))
-                    status.text = "Offline – „$name“ im Stapel (wird beim Speichern geprüft)"
+                    status.text = "Offline – „$label“ im Stapel (wird beim Speichern geprüft)"
                     delay(900L)
                 } else if (e.code == Api.UNREACHABLE) {
                     queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan), proxy, targetDeck))
                     delay(900L)
                 } else {
                     feedback.error(overlay, sound)
-                    status.text = e.message
+                    status.text = if (codeOnly && (e.code == 404 || e.code == 400))
+                        "Nicht gefunden: $label – Code erneut scannen" else e.message
                     delay(if (e.code == 404) 900L else 2500L)
                 }
                 paused = false
@@ -491,11 +629,20 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         }
     }
 
+    /** Sicher erkannte Edition merken (wird bevorzugt, wenn beim nächsten Scan unten nichts lesbar ist). */
+    private fun rememberSet(card: JSONObject, codeOnly: Boolean) {
+        if (codeOnly || card.optString("match") in listOf("exact", "set")) {
+            card.optString("set_code").takeIf { it.isNotBlank() }?.let { Prefs.setLastSet(requireContext(), it) }
+            refreshModeInfo()
+        }
+    }
+
     private fun queueOffline(p: PendingScan) {
         PendingQueue.add(requireContext(), p)
-        ScanSession.push(RecentScan(0L, p.name, null, p.quantity, pending = true))
+        val label = p.name.ifBlank { "${p.setCode} #${p.cn}" }
+        ScanSession.push(RecentScan(0L, label, null, p.quantity, pending = true))
         feedback.success(overlay, sound)
-        status.text = "Offline – „${p.name}“ in Warteschlange"
+        status.text = "Offline – „$label“ in Warteschlange"
         refreshSessionViews()
     }
 
@@ -509,6 +656,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             if (printed.isNotBlank() && printed != "null" && printed != card.optString("name")) append(printed).append('\n')
             append(card.optString("type_line")).append('\n').append(setLine)
             append("\nFarbidentität: ").append(card.optString("color_identity").ifBlank { "farblos" })
+            PrintPicker.matchText(card).takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
         }
         val owned = card.optJSONObject("owned")
         resOwned.text = "Im Bestand: ${owned?.optInt("this_print") ?: 0} (dieser Druck) · ${owned?.optInt("all_prints") ?: 0} gesamt"

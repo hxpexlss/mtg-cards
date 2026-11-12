@@ -28,6 +28,14 @@ class GuideOverlayView @JvmOverloads constructor(
             invalidate()
         }
 
+    /** Code-Modus: flacher Streifen nur für den unteren Kartenrand (Set-Code + Sammlernummer). */
+    var codeMode: Boolean = false
+        set(value) {
+            field = value
+            computeRect(width, height)
+            invalidate()
+        }
+
     var active: Boolean = false
         set(value) {
             field = value
@@ -58,6 +66,14 @@ class GuideOverlayView @JvmOverloads constructor(
 
     private fun computeRect(w: Int, h: Int) {
         if (w == 0 || h == 0) return
+        if (codeMode) {
+            val sw = w * 0.86f
+            val sh = sw * 0.24f
+            val left = (w - sw) / 2f
+            val top = h * 0.40f - sh / 2f
+            cardRect = RectF(left, top, left + sw, top + sh)
+            return
+        }
         val ratio = if (landscape) 88f / 63f else 63f / 88f   // Breite / Höhe
         val cardW = min(w * (if (landscape) 0.94f else 0.84f), h * 0.68f * ratio)
         val cardH = cardW / ratio
@@ -66,8 +82,27 @@ class GuideOverlayView @JvmOverloads constructor(
         cardRect = RectF(left, top, left + cardW, top + cardH)
     }
 
+    private val hint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(4f, 0f, 1f, Color.BLACK)
+    }
+
     override fun onDraw(canvas: Canvas) {
         val r = cardRect ?: return
+        if (codeMode) {
+            path.reset()
+            path.fillType = Path.FillType.EVEN_ODD
+            path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
+            path.addRoundRect(r, 18f, 18f, Path.Direction.CW)
+            canvas.drawPath(path, dim)
+            frame.color = if (active) Color.rgb(63, 185, 80) else Color.rgb(139, 108, 255)
+            canvas.drawRoundRect(r, 18f, 18f, frame)
+            hint.textSize = r.height() * 0.16f
+            canvas.drawText("Unteren Kartenrand hier: z.B. „0077“ und „FDN • DE“", r.centerX(),
+                r.bottom + hint.textSize * 1.6f, hint)
+            return
+        }
         val radius = r.width() * 0.045f
         path.reset()
         path.fillType = Path.FillType.EVEN_ODD

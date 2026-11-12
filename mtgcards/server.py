@@ -346,11 +346,12 @@ def _lookup_from(h, data):
         collector_number=data.get("cn") or data.get("collector_number"),
         lang=data.get("lang"),
         scryfall_id=data.get("id") or data.get("scryfall_id"),
+        prefer_set=data.get("prefer_set"),
     )
 
 
 def r_lookup(h, qs):
-    data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id")}
+    data = {k: _first(qs, k) for k in ("name", "set", "cn", "lang", "id", "prefer_set")}
     if data["lang"] == "auto":
         data["lang"] = ""
     data["alt"] = qs.get("alt", [])
@@ -363,8 +364,9 @@ def r_lookup(h, qs):
 
 def _add_one(h, data):
     """Fügt eine Karte hinzu und erfüllt passende Wünsche. Gibt (zeile, neu) zurück."""
-    if not (data.get("name") or data.get("scryfall_id") or data.get("id")):
-        raise ApiError(400, "name oder scryfall_id angeben")
+    has_code = (data.get("set") or data.get("set_code")) and (data.get("cn") or data.get("collector_number"))
+    if not (data.get("name") or data.get("scryfall_id") or data.get("id") or has_code):
+        raise ApiError(400, "name, scryfall_id oder Set + Sammlernummer angeben")
     card = normalize_card(_lookup_from(h, data))
     try:
         qty = int(data.get("quantity") or 1)

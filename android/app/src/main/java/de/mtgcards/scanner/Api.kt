@@ -122,8 +122,9 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null,
                        alternatives: List<String> = emptyList(), lang: String? = null,
-                       scryfallId: String? = null): JSONObject {
+                       scryfallId: String? = null, preferSet: String? = null): JSONObject {
         val q = buildList {
+            if (!preferSet.isNullOrBlank()) add("prefer_set=${enc(preferSet)}")
             if (!scryfallId.isNullOrBlank()) add("id=${enc(scryfallId)}")
             if (!lang.isNullOrBlank()) add("lang=${enc(lang)}")
             if (!name.isNullOrBlank()) add("name=${enc(name)}")
@@ -173,6 +174,9 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     suspend fun card(id: Long) = json("GET", "/api/cards/$id")
 
     suspend fun decks() = json("GET", "/api/decks")
+
+    /** Alle Drucke einer Karte (Edition, Nummer, Preis) – für "Druck ändern". */
+    suspend fun prints(name: String) = json("GET", "/api/prints?name=${enc(name)}")
 
     suspend fun sets() = json("GET", "/api/sets")
 

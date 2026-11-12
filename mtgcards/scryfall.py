@@ -129,7 +129,33 @@ def normalize_card(raw):
         "price_usd_foil": prices.get("usd_foil"),
     }
     card["auto_tags"] = auto_tags(card)
+    card["match"] = raw.get("_match")      # wie sicher der Druck ist (nur für die Anzeige, nicht gespeichert)
     return card
+
+
+_OCR_CONFUSIONS = {"0": "O", "O": "0", "1": "I", "I": "1", "5": "S", "S": "5", "8": "B", "B": "8",
+                   "2": "Z", "Z": "2", "6": "G", "G": "6"}
+
+
+def set_code_variants(code, limit=6):
+    """Set-Code wie gelesen, danach Varianten mit je einem typischen OCR-Lesefehler
+    (0/O, 1/I, 5/S, 8/B, 2/Z, 6/G), z.B. "M1C" -> "MIC"."""
+    code = (code or "").upper()
+    out = [code] if code else []
+    for i, ch in enumerate(code):
+        alt = _OCR_CONFUSIONS.get(ch)
+        if alt:
+            v = code[:i] + alt + code[i + 1:]
+            if v not in out:
+                out.append(v)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _tag(card, how):
+    """Kopie der Karte mit Info, wie der Druck gefunden wurde (Cache-Objekte nicht verändern)."""
+    return dict(card, _match=how)
 
 
 class DiskCache:
@@ -365,8 +391,9 @@ class Scryfall:
         Mit lang (z.B. "de") wird der Druck in dieser Sprache gesucht.
         """
         lang = kw.get("lang")
-        if lang and lang.lower() not in ("auto", "any", "en") and not kw.get("scryfall_id"):
-            return self.localize(self._lookup_any(name, alternatives, **kw), lang)
+        if lang and lang.lower() not in ("auto", "any", "en"):
+            found = self._lookup_any(name, alternatives, **kw)
+            return dict(self.localize(found, lang), _match=found.get("_match"))
         return self._lookup_any(name, alternatives, **kw)
 
     def _lookup_any(self, name=None, alternatives=(), **kw):
@@ -381,41 +408,56 @@ class Scryfall:
             if len(alt) < 3 or alt == name:
                 continue
             try:
-                return self.lookup(name=alt)
+                return self.lookup(name=alt, prefer_set=kw.get("prefer_set"))
             except ScryfallError as e:
                 if e.status not in (400, 404):
                     raise
         raise first
 
-    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None):
-        """Findet eine Karte. Reihenfolge: ID -> Set+Nummer -> Name(+Set) -> fremdsprachiger Name."""
-        if scryfall_id:
-            return self.by_id(scryfall_id)
+    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None,
+               prefer_set=None):
+        """Findet eine Karte und merkt sich, wie sicher der Druck ist (Feld "_match"):
 
-        set_code = (set_code or "").strip() or None
+        "exact"     – Set-Code + Sammlernummer vom Kartenrand passen
+        "set"       – Name + gelesener Set-Code
+        "preferred" – Name + bevorzugte Edition (zuletzt gescannt / im Scanner festgelegt)
+        "name"      – nur der Name: Scryfalls Standard-Druck (meist der neueste)
+        """
+        if scryfall_id:
+            return _tag(self.by_id(scryfall_id), "id")
+
+        set_code = (set_code or "").strip().upper() or None
+        prefer_set = (prefer_set or "").strip().upper() or None
         collector_number = (str(collector_number).strip().lstrip("0") or "0") if collector_number else None
 
+        # 1) Set-Code + Sammlernummer (mit typischen OCR-Verwechslungen im Set-Code: 0/O, 1/I, 5/S …)
         if set_code and collector_number:
-            for lg in ([lang, None] if lang and lang.lower() != "en" else [None]):
-                try:
-                    card = self.by_set_number(set_code, collector_number, lg)
+            for code in set_code_variants(set_code):
+                for lg in ([lang, None] if lang and lang.lower() != "en" else [None]):
+                    try:
+                        card = self.by_set_number(code, collector_number, lg)
+                    except ScryfallError as e:
+                        if e.status not in (400, 404):
+                            raise
+                        continue
                     if not name or name_matches(name, card):
-                        return card
-                except ScryfallError as e:
-                    if e.status not in (400, 404):
-                        raise
+                        return _tag(card, "exact")
 
         if not name:
             raise ScryfallError("Kein Kartenname angegeben", 400)
 
-        if set_code:
-            try:
-                return self.named(name, set_code)
-            except ScryfallError as e:
-                if e.status not in (400, 404):
-                    raise
+        # 2) Name + gelesener Set-Code, dann Name + bevorzugte Edition
+        tries = [(code, "set") for code in set_code_variants(set_code)] if set_code else []
+        if prefer_set and prefer_set != set_code:
+            tries.append((prefer_set, "preferred"))
+        for code, how in tries:
+            card = self._named_in_set(name, code)
+            if card:
+                return _tag(card, how)
+
+        # 3) Nur der Name
         try:
-            return self.named(name)
+            return _tag(self.named(name), "name")
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
@@ -428,10 +470,29 @@ class Scryfall:
             results = data.get("data") or []
             for card in results:
                 if name_matches(name, card, threshold=0.7):
-                    return card
+                    return _tag(card, "name")
             if results:
-                return results[0]
+                return _tag(results[0], "name")
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
         raise ScryfallError(f'Keine Karte gefunden für "{name}"', 404) from last
+
+    def _named_in_set(self, name, code):
+        """Karte per Name in einer bestimmten Edition – englischer oder fremdsprachiger Name."""
+        try:
+            return self.named(name, code)
+        except ScryfallError as e:
+            if e.status not in (400, 404):
+                raise
+        safe = name.replace('"', "")
+        try:
+            data = self.search(f'"{safe}" lang:any e:{code.lower()}', unique="prints", order="released")
+        except ScryfallError as e:
+            if e.status not in (400, 404):
+                raise
+            return None
+        for card in data.get("data") or []:
+            if name_matches(name, card, threshold=0.7):
+                return card
+        return None

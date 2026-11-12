@@ -31,7 +31,7 @@ class BatchActivity : AppCompatActivity() {
         saveButton = findViewById(R.id.batchSave)
         findViewById<View>(R.id.batchBack).setOnClickListener { finish() }
         items = BatchStore.all(this)
-        adapter = BatchAdapter(lifecycleScope, items) { persist() }
+        adapter = BatchAdapter(lifecycleScope, items, { persist() }) { pos -> changePrint(pos) }
         findViewById<RecyclerView>(R.id.batchList).apply {
             layoutManager = LinearLayoutManager(this@BatchActivity)
             adapter = this@BatchActivity.adapter
@@ -49,6 +49,21 @@ class BatchActivity : AppCompatActivity() {
                 .show()
         }
         updateSummary()
+    }
+
+    private fun changePrint(pos: Int) {
+        val old = items.getOrNull(pos) ?: return
+        if (old.name.isBlank() && old.scryfallId == null) {
+            Toast.makeText(this, "Offline gescannt – Druck kann nach dem Speichern geändert werden", Toast.LENGTH_SHORT).show()
+            return
+        }
+        PrintPicker.show(this, lifecycleScope, old.name, old.lang) { card ->
+            val fresh = BatchItem.fromCard(card, old.foil, old.proxy, old.deckId)
+            fresh.quantity = old.quantity
+            items[pos] = fresh
+            adapter.notifyItemChanged(pos)
+            persist()
+        }
     }
 
     private fun persist() {
@@ -117,6 +132,7 @@ class BatchAdapter(
     private val scope: CoroutineScope,
     private val items: MutableList<BatchItem>,
     private val onChange: () -> Unit,
+    private val onPrint: (Int) -> Unit,
 ) : RecyclerView.Adapter<BatchAdapter.VH>() {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -136,11 +152,13 @@ class BatchAdapter(
 
     override fun onBindViewHolder(h: VH, position: Int) {
         val it = items[position]
-        h.name.text = it.name
+        h.name.text = it.name.ifBlank { "${it.setCode} #${it.cn}" }
+        h.name.setOnClickListener { _ -> onPrint(h.bindingAdapterPosition) }
+        h.sub.setOnClickListener { _ -> onPrint(h.bindingAdapterPosition) }
         val where = listOfNotNull(it.setCode?.uppercase(), it.cn?.let { cn -> "#$cn" }).joinToString(" ")
         h.sub.text = buildString {
             if (it.proxy) append("🅿 Proxy · ")
-            if (where.isNotBlank()) append(where).append(" · ")
+            if (where.isNotBlank()) append(where).append(" ✎ · ")
             append(if (it.scryfallId == null) "offline – wird geprüft" else euro(it.unitPrice))
             if (it.quantity > 1 && it.unitPrice != null) append(" · zus. ${euro(it.unitPrice!! * it.quantity)}")
         }

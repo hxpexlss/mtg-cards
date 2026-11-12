@@ -65,7 +65,7 @@ class FakeScryfall:
     def __init__(self):
         self.calls = 0
 
-    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None):
+    def lookup(self, name=None, set_code=None, collector_number=None, lang=None, scryfall_id=None, prefer_set=None):
         self.calls += 1
         if scryfall_id:
             for c in ALL:

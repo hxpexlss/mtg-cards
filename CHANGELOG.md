@@ -4,6 +4,24 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [1.11.0] – 2026-11-12
+
+### Neu
+- **Code-Modus beim Scannen:** nur den unteren Kartenrand scannen (z.B. `0077` und `FDN • DE`) – Set-Code und
+  Sammlernummer bestimmen den Druck eindeutig, inklusive Sprache. Im Seitenmenü einschaltbar.
+- **„Druck ändern“** im Scan-Ergebnis und in der Stapel-Zusammenfassung (Liste aller Drucke mit Edition und Preis).
+- Anzeige, wie sicher der Druck ist: ✓ erkannt · ≈ Edition übernommen · ⚠ geraten.
+- **Edition festlegen** im Seitenmenü (z.B. `FDN`); ohne Festlegung wird die zuletzt sicher erkannte Edition
+  bevorzugt, wenn unten nichts lesbar ist – praktisch für Stapel aus einer Edition.
+
+### Verbessert
+- Texterkennung in Full-HD und exakte Umrechnung des Rahmens auf das Kamerabild – die kleine Zeile mit Set-Code
+  und Nummer wird deutlich häufiger gelesen.
+- Set-Code und Nummer werden über mehrere Bilder gesammelt (Mehrheitsentscheid); bei Bedarf wird kurz weitergelesen.
+- Server korrigiert typische Lesefehler im Set-Code (0/O, 1/I, 5/S, 8/B …).
+- Deutsche (fremdsprachige) Karten: ein gelesener Set-Code wird jetzt berücksichtigt (vorher immer neuester Druck).
+- Gewählter Druck + Sprache: es wird derselbe Druck in dieser Sprache gespeichert (auch am PC).
+
 ## [1.10.0] – 2026-11-12
 
 ### Neu

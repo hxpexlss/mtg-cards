@@ -242,6 +242,14 @@
                 android:orientation="horizontal">
 
                 <Button
+                    android:id="@+id/btnPrint"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Druck ändern" />
+
+                <Button
                     android:id="@+id/btnDiscard"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="0dp"
@@ -328,6 +336,33 @@
                 android:id="@+id/langSpinner"
                 android:layout_width="match_parent"
                 android:layout_height="48dp" />
+
+            <TextView
+                style="@style/ScanMenuHeader"
+                android:text="Druck / Edition" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/codeMode"
+                style="@style/ScanMenuSwitch"
+                android:text="Nur unteren Rand scannen (Set-Code + Nummer)" />
+
+            <TextView
+                style="@style/ScanMenuHint"
+                android:text="Genaueste Erkennung des Drucks: z.B. „0077“ und „FDN • DE“ in den Streifen halten. Für Karten ab ca. 2014." />
+
+            <EditText
+                android:id="@+id/fixedSet"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="Edition festlegen, z.B. FDN (leer = automatisch)"
+                android:importantForAutofill="no"
+                android:inputType="textCapCharacters|textNoSuggestions"
+                android:maxLength="6" />
+
+            <TextView
+                style="@style/ScanMenuHint"
+                android:text="Automatisch: Ist unten nichts lesbar, wird die zuletzt sicher erkannte Edition bevorzugt – praktisch für Stapel aus einer Edition." />
 
             <TextView
                 style="@style/ScanMenuHeader"

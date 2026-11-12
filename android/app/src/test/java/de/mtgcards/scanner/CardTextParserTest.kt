@@ -53,6 +53,26 @@ class CardTextParserTest {
     }
 
     @Test
+    fun codeModeStrip() {
+        // Nur der untere Rand im Streifen-Rahmen (x 50..700, y 400..540)
+        val strip = Region(50f, 400f, 700f, 540f)
+        val lines = listOf(
+            line("0077 C", 70, 410, 200, 450),
+            line("FDN • DE  Jane Doe", 70, 470, 420, 510),
+            line("© 2024 Wizards", 500, 900, 700, 930),          // außerhalb
+        )
+        val r = CardTextParser.parseCode(lines, strip)
+        assertEquals("FDN", r.setCode)
+        assertEquals("77", r.collectorNumber)
+        assertEquals("de", r.lang)
+        val old = CardTextParser.parseCode(listOf(line("123/280 R", 70, 410, 200, 450),
+            line("MH3 • EN", 70, 470, 200, 510)), strip)
+        assertEquals("123", old.collectorNumber)
+        assertEquals("MH3", old.setCode)
+        assertNull(CardTextParser.parseCode(listOf(line("Irgendwas", 70, 410, 200, 450)), strip).setCode)
+    }
+
+    @Test
     fun nothingInFrame() {
         val r = CardTextParser.parse(listOf(line("Irgendwas", 0, 0, 50, 20)), card)
         assertNull(r.name)
