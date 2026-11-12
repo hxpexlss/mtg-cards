@@ -4,6 +4,20 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [1.11.1] – 2026-11-12
+
+### Behoben
+- **Code-Modus erkannte praktisch nichts:** Er verlangte zwei direkt aufeinanderfolgende, exakt gleiche Lesungen,
+  und jedes nur teilweise lesbare Bild setzte das zurück. Jetzt werden Set-Code und Nummer wie im Namens-Modus über
+  mehrere Bilder gesammelt (Mehrheitsentscheid).
+- Nach einem Fehlversuch zeigte die App „✓ Nächste Karte“, obwohl nichts erkannt war – jetzt „Nicht gefunden …“,
+  und eine andere Lesung wird sofort erneut versucht.
+
+### Verbessert
+- Toleranteres Lesen der Code-Zeile: Trennzeichen statt „•“ (·, ., *, e …), O/0 und I/1 in der Nummer,
+  Nummer ohne Seltenheitsbuchstaben.
+- Die Statuszeile zeigt im Code-Modus, was gerade gelesen wird – hilft beim Ausrichten.
+
 ## [1.11.0] – 2026-11-12
 
 ### Neu

@@ -90,6 +90,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private val langVotes = mutableListOf<String>()
     private var waitFrames = 0
     private var lastCode: String? = null
+    private val codeSetVotes = mutableListOf<String>()
+    private val codeCnVotes = mutableListOf<String>()
+    private val codeLangVotes = mutableListOf<String>()
+    private var emptyFrames = 0
+    private var blockedFailed = false
     private lateinit var batchButton: Button
 
     private var camera: Camera? = null
@@ -239,6 +244,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 Prefs.setCodeMode(ctx, on)
                 voter.reset()
                 resetVotes()
+                clearCodeVotes()
                 lastCode = null
                 status.text = if (on) "Code-Modus: unteren Kartenrand in den Streifen halten" else "Namens-Modus"
                 refreshModeInfo()
@@ -518,7 +524,8 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         }
         val key = CardTextParser.normalize(name)
         if (isBlocked(key)) {
-            status.text = "✓ Nächste Karte in den Rahmen halten"
+            status.text = if (blockedFailed) "Nicht gefunden – Karte etwas anders halten oder „Name eingeben“"
+            else "✓ Nächste Karte in den Rahmen halten"
             return
         }
         overlay.active = true
@@ -545,32 +552,56 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         lookup(scan)
     }
 
-    /** Code-Modus: nur Set-Code + Sammlernummer vom unteren Rand. */
+    /**
+     * Code-Modus: nur Set-Code + Sammlernummer vom unteren Rand.
+     * Wie im Namens-Modus werden die Werte über mehrere Bilder gesammelt (Mehrheitsentscheid);
+     * Bilder, in denen nur ein Teil lesbar ist, zählen trotzdem mit.
+     */
     private fun onCodeText(lines: List<OcrLine>, strip: Region) {
         val r = CardTextParser.parseCode(lines, strip)
-        if (r.setCode == null || r.collectorNumber == null) {
-            lastCode = null
-            blockedName = null
+        if (r.setCode == null && r.collectorNumber == null) {
+            emptyFrames++
+            if (emptyFrames >= 3) {          // Karte weg -> neu beginnen, Sperre aufheben
+                clearCodeVotes()
+                blockedName = null
+                blockedFailed = false
+            }
             overlay.active = false
-            status.text = if (r.setCode != null || r.collectorNumber != null)
-                "Lese … ${r.setCode ?: "?"} #${r.collectorNumber ?: "?"}"
+            status.text = if (r.raw.isNotBlank()) "Lese … „${r.raw.take(40)}“"
             else "Unteren Kartenrand in den Streifen halten (z.B. „0077“ und „FDN • DE“)"
             return
         }
-        val key = "${r.setCode}|${r.collectorNumber}"
+        emptyFrames = 0
+        r.setCode?.let { codeSetVotes += it }
+        r.collectorNumber?.let { codeCnVotes += it }
+        r.lang?.let { codeLangVotes += it }
+        for (l in listOf(codeSetVotes, codeCnVotes, codeLangVotes)) while (l.size > 8) l.removeAt(0)
+
+        val set = mostCommon(codeSetVotes)
+        val cn = mostCommon(codeCnVotes)
+        val key = "$set|$cn"
         if (key == blockedName) {
-            status.text = "✓ Nächste Karte – unteren Rand in den Streifen halten"
+            status.text = if (blockedFailed) "Nicht gefunden: $set #$cn – Karte etwas anders halten oder Licht an"
+            else "✓ Nächste Karte – unteren Rand in den Streifen halten"
             return
         }
         overlay.active = true
-        if (key != lastCode) {          // zweimal genau gleich gelesen -> nachschlagen
-            lastCode = key
-            status.text = "Lese ${r.setCode} #${r.collectorNumber} …"
+        val sure = set != null && cn != null &&
+            codeSetVotes.count { it == set } >= 2 && codeCnVotes.count { it == cn } >= 2
+        if (!sure) {
+            status.text = "Lese ${set ?: "?"} #${cn ?: "?"} …" + if (r.raw.isNotBlank()) "  („${r.raw.take(30)}“)" else ""
             return
         }
-        lastCode = null
+        val lang = mostCommon(codeLangVotes)
+        clearCodeVotes()
         feedback.found(overlay)
-        lookup(ScanResult(null, r.setCode, r.collectorNumber, emptyList(), r.lang))
+        lookup(ScanResult(null, set, cn, emptyList(), lang))
+    }
+
+    private fun clearCodeVotes() {
+        codeSetVotes.clear()
+        codeCnVotes.clear()
+        codeLangVotes.clear()
     }
 
     // ------------------------------------------------------------------ Nachschlagen / Hinzufügen
@@ -595,6 +626,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 val card = Api.fromPrefs(requireContext()).lookup(scan.name, scan.setCode, scan.collectorNumber,
                     scan.alternatives, langFor(scan), preferSet = preferSet)
                 rememberSet(card, codeOnly)
+                blockedFailed = false
                 when {
                     batchSwitch.isChecked -> {
                         addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy, targetDeck), card)
@@ -608,6 +640,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 }
             } catch (e: ApiException) {
                 blockedName = blockKey
+                blockedFailed = true
                 overlay.active = false
                 if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
                     // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
