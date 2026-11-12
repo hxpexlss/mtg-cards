@@ -82,7 +82,13 @@ object CardTextParser {
         val footer = Region(card.left - 0.04f * w, card.bottom - 0.12f * h, card.right + 0.04f * w, card.bottom + 0.05f * h)
         val hints = oldCardHints(lines.filter { footer.contains(it.cx, it.cy) })
 
-        val primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
+        var primary = name?.takeIf { it.isNotBlank() } ?: alternatives.firstOrNull()
+        // Emblem-Karten: oben steht nur "Emblem", der Planeswalker steht in der Typzeile ("Emblem — Chandra")
+        val inCard = lines.filter { card.contains(it.cx, it.cy) }
+        if (inCard.any { normalize(it.text) == "emblem" }) {
+            primary = inCard.map { cleanName(it.text) }
+                .firstOrNull { normalize(it).startsWith("emblem ") } ?: "Emblem"
+        }
         return ScanResult(primary, set, cn, alternatives.filter { it != primary }, lang,
             code.total, hints.artist, hints.year)
     }

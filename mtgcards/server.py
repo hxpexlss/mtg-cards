@@ -599,7 +599,16 @@ def r_prints(h, qs):
         raise ApiError(400, "name angeben")
     lang = _first(qs, "lang").strip().lower()
     out = []
-    for raw in h.ctx.scryfall.prints(name, lang) if lang else h.ctx.scryfall.prints(name):
+    raws = h.ctx.scryfall.prints(name, lang) if lang else h.ctx.scryfall.prints(name)
+    if not raws and hasattr(h.ctx.scryfall, "lookup_any"):
+        # z.B. deutscher Name "Blitzschlag" -> Drucke von "Lightning Bolt" in der passenden Sprache
+        try:
+            found = h.ctx.scryfall.lookup_any(name=name, lang=lang or None)
+            english = found.get("name") or name
+            raws = h.ctx.scryfall.prints(english, lang or found.get("lang"))
+        except ScryfallError:
+            raws = []
+    for raw in raws:
         c = normalize_card(raw)
         out.append({k: c.get(k) for k in ("scryfall_id", "name", "printed_name", "set_code", "set_name",
                                           "collector_number", "rarity", "image_url", "lang",

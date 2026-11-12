@@ -120,6 +120,16 @@ class CardTextParserTest {
         assertEquals("1995", r.year)
         assertNull(r.total)
     }
+
+    @Test
+    fun emblemUsesTypeLine() {
+        val lines = listOf(
+            line("Emblem", 300, 225, 520, 255),
+            line("Emblem — Chandra", 130, 700, 450, 725),
+            line("Whenever you cast a spell, this emblem deals 5 damage", 130, 760, 690, 785),
+        )
+        assertEquals("Emblem Chandra", CardTextParser.parse(lines, card).name)
+    }
 }
 
 class CandidateVoterTest {
