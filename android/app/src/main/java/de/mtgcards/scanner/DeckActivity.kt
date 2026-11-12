@@ -81,6 +81,9 @@ class DeckActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.deckSummary).text = buildString {
             append("${st.optInt("cards")} Karten · ${st.optInt("owned")} vorhanden · ${st.optInt("missing")} fehlen")
             if (ci.isNotBlank()) append(" · Farbidentität $ci")
+            append("\nWert (echte Karten): ${euro(st.optDouble("value_eur", 0.0))}")
+            if (st.optInt("missing") > 0) append(" · fehlende kosten ca. ${euro(st.optDouble("missing_value_eur", 0.0))}")
+            if (st.optInt("without_price") > 0) append(" · ${st.optInt("without_price")} ohne Preis")
             val cmd = d.optJSONArray("commanders")
             val comp = d.optJSONArray("companions")
             if (cmd != null && cmd.length() > 0) append("\nCommander${if (cmd.length() > 1) " (Partner)" else ""}: " +
@@ -130,7 +133,8 @@ class DeckActivity : AppCompatActivity() {
                     val warn = (if (c.optBoolean("outside_identity")) "  ⚠" else "") +
                         (if (!c.isNull("warning") && c.optString("warning").isNotBlank()) "  ⚠ ${c.optString("warning")}" else "")
                     val also = if (others.isNotBlank()) "\n      auch in: $others" else ""
-                    text = "$status  ${c.optInt("quantity")}  ${c.optString("name")}$extra$warn$also"
+                    val price = if (c.isNull("unit_price_eur")) "" else "  · ${euro(c.optDouble("unit_price_eur"))}"
+                    text = "$status  ${c.optInt("quantity")}  ${c.optString("name")}$extra$price$warn$also"
                     textSize = 15f
                     setPadding(0, (3 * dp).toInt(), 0, (3 * dp).toInt())
                     val cardId = c.optLong("id")

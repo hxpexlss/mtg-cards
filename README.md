@@ -41,7 +41,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.11.1_all.deb
+sudo apt install ./mtg-cards-desktop_1.12.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -56,7 +56,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.11.1_all.deb
+sudo apt install ./mtg-cards-server_1.12.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 

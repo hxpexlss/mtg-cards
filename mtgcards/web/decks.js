@@ -45,10 +45,14 @@ function renderDeckList() {
     return `<div class="deck-item ${decks.current && decks.current.id === d.id ? "active" : ""}" data-deck="${d.id}">
       <div class="t">${esc(d.name)} <span class="pill status-${esc(d.status)}">${esc(STATUS_LABEL[d.status] || "Bau")}</span></div>
       <div class="s"><span>${esc(d.commanders.join(" & ") || d.format)}</span>${d.commanders.length ? ciHtml(d.color_identity) : ""}</div>
-      <div class="s"><span>${d.stats.cards} Karten</span><span>${d.stats.missing ? d.stats.missing + " fehlen" : "✓ komplett"}</span></div>
+      <div class="s"><span>${d.stats.cards} Karten · ${euro(d.stats.value_eur)}</span><span>${d.stats.missing ? d.stats.missing + " fehlen" : "✓ komplett"}</span></div>
       <div class="progress"><div style="width:${pct}%"></div></div>
     </div>`;
   }).join("") || `<p class="muted small">${decks.list.length ? "Keine Decks mit diesem Status." : "Noch keine Decks."}</p>`;
+}
+
+function euro(v) {
+  return (v || 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
 }
 
 function renderDeckEmpty() {
@@ -101,6 +105,8 @@ function renderDeck(d) {
       <div class="stat"><b>${st.cards}</b>Karten</div>
       <div class="stat good"><b>${st.owned}</b>vorhanden</div>
       <div class="stat ${st.missing ? "bad" : "good"}"><b>${st.missing}</b>fehlen</div>
+      <div class="stat" title="Wert deiner echten Karten in diesem Deck (Proxies zählen nicht)${st.without_price ? ` – ${st.without_price} Karten ohne Preis` : ""}"><b>${euro(st.value_eur)}</b>Wert</div>
+      ${st.missing ? `<div class="stat bad" title="Marktpreis der fehlenden Karten (Standard-Druck)"><b>${euro(st.missing_value_eur)}</b>fehlende kosten</div>` : ""}
       ${st.basic_lands ? `<div class="stat"><b>${st.basic_lands}</b>Standardländer</div>` : ""}
       ${st.shared ? `<div class="stat warn" title="Diese Karten besitzt du, sie stecken aber auch in anderen Decks. Um alle Decks gleichzeitig zu bauen, fehlen ${st.missing_reserved}."><b>${st.shared}</b>mit anderen Decks geteilt ⇄</div>` : ""}
       ${d.commanders.length ? `<div class="stat ${st.outside_identity ? "bad" : "good"}"><b>${st.outside_identity}</b>außerhalb der Farbidentität</div>` : ""}
@@ -140,6 +146,7 @@ function deckCardHtml(c) {
   const status = c.basic ? "–" : (c.missing ? "✗" : (c.shared ? "⇄" : "✓"));
   const others = (c.other_decks || []).map((u) => `${u.deck} (${u.quantity})`).join(", ");
   let tip = c.basic ? "Standardland" : `${c.owned} in der Sammlung`;
+  if (c.unit_price_eur) tip += ` · ${euro(c.unit_price_eur)}/Stück`;
   if (others) tip += ` · auch in: ${others}`;
   if (c.shared) tip += " – reicht nicht für alle Decks gleichzeitig";
   return `<div class="dc ${cls}" data-dc="${c.id}">

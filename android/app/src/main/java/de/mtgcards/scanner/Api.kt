@@ -122,8 +122,12 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun lookup(name: String?, setCode: String? = null, cn: String? = null,
                        alternatives: List<String> = emptyList(), lang: String? = null,
-                       scryfallId: String? = null, preferSet: String? = null): JSONObject {
+                       scryfallId: String? = null, preferSet: String? = null,
+                       total: String? = null, artist: String? = null, year: String? = null): JSONObject {
         val q = buildList {
+            if (!total.isNullOrBlank()) add("total=${enc(total)}")
+            if (!artist.isNullOrBlank()) add("artist=${enc(artist)}")
+            if (!year.isNullOrBlank()) add("year=${enc(year)}")
             if (!preferSet.isNullOrBlank()) add("prefer_set=${enc(preferSet)}")
             if (!scryfallId.isNullOrBlank()) add("id=${enc(scryfallId)}")
             if (!lang.isNullOrBlank()) add("lang=${enc(lang)}")
@@ -176,7 +180,12 @@ class Api(private val baseUrl: String, private val token: String, private val fi
     suspend fun decks() = json("GET", "/api/decks")
 
     /** Alle Drucke einer Karte (Edition, Nummer, Preis) – für "Druck ändern". */
-    suspend fun prints(name: String) = json("GET", "/api/prints?name=${enc(name)}")
+    suspend fun prints(name: String, lang: String? = null) =
+        json("GET", "/api/prints?name=${enc(name)}" + (lang?.takeIf { it.isNotBlank() && it != "en" }?.let { "&lang=${enc(it)}" } ?: ""))
+
+    /** Anderen Druck (Edition/Sprache) für einen Sammlungseintrag übernehmen. */
+    suspend fun changePrint(id: Long, scryfallId: String) =
+        json("PUT", "/api/cards/$id", JSONObject().put("scryfall_id", scryfallId))
 
     suspend fun sets() = json("GET", "/api/sets")
 

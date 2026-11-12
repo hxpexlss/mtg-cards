@@ -4,6 +4,33 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [1.12.0] – 2026-11-12
+
+### Neu
+- **Preis pro Deck:** Wert der echten Karten im Deck (Proxies zählen nicht), bei fehlenden Karten zusätzlich,
+  was sie ungefähr kosten. In der Deckliste und in der Deckansicht (App und PC), Stückpreis je Karte.
+- **Tag „Emblem“** für Embleme von Planeswalkern (vorhandene Karten werden beim Update nachgetaggt).
+  Embleme werden mit ihrem Planeswalker verknüpft („Gehört zu …“ / „Emblem vorhanden“) – die Verknüpfung wird bei
+  jeder Anzeige neu berechnet, die Reihenfolge des Hinzufügens ist also egal.
+- **Druck / Sprache ändern** bei gespeicherten Karten (App: Kartendetails, PC: „Druck ändern“), inkl. Sprachauswahl.
+- **Alte Karten besser erkennen:** „123/249“ (Nummer + Kartenanzahl der Edition), Künstler („Illus. …“) und
+  Copyright-Jahr werden gelesen. Bleibt der Druck unsicher, vergleicht die App das **Artwork** mit den Drucken
+  von Scryfall.
+
+### Geändert
+- **Proxy-Modus:** Es wird nicht mehr nach der Edition gesucht – der Name reicht, gespeichert wird der
+  Standard-Druck. Der Code-Modus pausiert, solange der Proxy-Modus an ist.
+- **Code-Modus neu:** Statt der kleinen Vorschaubilder macht die App Fotos in voller Kamera-Auflösung, schneidet den
+  Streifen aus und liest ihn. Dazu 2x-Zoom (Karte nicht zu nah halten) und gezieltes Scharfstellen auf den Streifen.
+
+### Behoben
+- **Falsche Sprache** (Japanisch, Chinesisch, Spanisch …): Die Sprache ist jetzt immer 1. die eingestellte
+  Scan-Sprache, 2. die Sprache, in der der gelesene Name gedruckt ist, 3. Englisch – nie mehr ein zufälliger
+  Suchtreffer. Vom Kartenrand gelesene Sprachen zählen nur, wenn sie mehrfach gleich gelesen werden.
+- **Fehlende Preise:** Scryfall führt Preise nur beim englischen Druck. Fremdsprachige Karten bekommen jetzt die
+  Preise des englischen Drucks (einmal „Alle aktualisieren“ repariert vorhandene Karten). Ohne Euro-Preis wird der
+  Dollar-Preis angezeigt.
+
 ## [1.11.1] – 2026-11-12
 
 ### Behoben

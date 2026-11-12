@@ -6,6 +6,10 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.core.UseCaseGroup
 import android.util.Size
 import android.graphics.Rect
+import android.graphics.Bitmap
+import android.graphics.BitmapRegionDecoder
+import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -35,6 +39,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -52,6 +58,10 @@ import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -95,6 +105,16 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private val codeLangVotes = mutableListOf<String>()
     private var emptyFrames = 0
     private var blockedFailed = false
+    // alte Karten: Kartenanzahl der Edition ("123/249"), Künstler, Jahr
+    private val totalVotes = mutableListOf<String>()
+    private val artistVotes = mutableListOf<String>()
+    private val yearVotes = mutableListOf<String>()
+    /** Farbsignatur des Artworks der gerade erkannten Karte (für den Artwork-Vergleich). */
+    private var artSig: FloatArray? = null
+    /** Fotos in voller Auflösung für den Code-Modus (null, wenn das Gerät es nicht zusammen mit der Analyse kann). */
+    private var imageCapture: ImageCapture? = null
+    private var codeJob: Job? = null
+    private var lastFocus = 0L
     private lateinit var batchButton: Button
 
     private var camera: Camera? = null
@@ -140,7 +160,10 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         proxySwitch.isChecked = Prefs.proxyMode(requireContext())
         proxySwitch.setOnCheckedChangeListener { _, on ->
             Prefs.setProxyMode(requireContext(), on)
-            status.text = if (on) "🅿 Proxy-Modus: gescannte Karten bekommen den Tag „Proxies“" else "Proxy-Modus aus"
+            status.text = if (on) "🅿 Proxy-Modus: nur der Name zählt, gespeichert wird der Standard-Druck" else "Proxy-Modus aus"
+            resetVotes()
+            clearCodeVotes()
+            applyGuideMode()
             refreshModeInfo()
         }
         batchButton = view.findViewById(R.id.btnBatch)
@@ -236,17 +259,21 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         }
         overlay.landscape = Prefs.landscape(ctx)
         val guide = this.overlay   // in apply{} wäre "overlay" die View-Eigenschaft des Schalters
-        guide.codeMode = Prefs.codeMode(ctx)
+        applyGuideMode()
         view.findViewById<MaterialSwitch>(R.id.codeMode).apply {
-            isChecked = guide.codeMode
+            isChecked = Prefs.codeMode(ctx)
             setOnCheckedChangeListener { _, on ->
-                guide.codeMode = on
                 Prefs.setCodeMode(ctx, on)
+                applyGuideMode()
                 voter.reset()
                 resetVotes()
                 clearCodeVotes()
                 lastCode = null
-                status.text = if (on) "Code-Modus: unteren Kartenrand in den Streifen halten" else "Namens-Modus"
+                status.text = when {
+                    on && proxy -> "Code-Modus pausiert, solange der Proxy-Modus an ist"
+                    on -> "Code-Modus: unteren Kartenrand in den Streifen halten"
+                    else -> "Namens-Modus"
+                }
                 refreshModeInfo()
             }
         }
@@ -342,12 +369,26 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             if (Prefs.scanDeckId(ctx) > 0) add("→ ${Prefs.scanDeckName(ctx).substringBeforeLast(" (")}")
             Prefs.scanLang(ctx).takeIf { it != "auto" }?.let { add(it.uppercase()) }
             if (Prefs.landscape(ctx)) add("Querformat")
-            if (Prefs.codeMode(ctx)) add("Code-Modus")
+            if (Prefs.codeMode(ctx)) add(if (proxySwitch.isChecked) "Code-Modus (pausiert)" else "Code-Modus")
             else (Prefs.fixedSet(ctx).ifBlank { null }?.let { "Edition $it (fest)" }
                 ?: Prefs.lastSet(ctx).ifBlank { null }?.let { "Edition $it" })?.let { add(it) }
         }
         modeInfo.text = parts.joinToString(" · ")
         modeInfo.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Code-Modus nur ohne Proxy-Modus (bei Proxies ist der Druck egal). */
+    private fun applyGuideMode() {
+        val ctx = context ?: return
+        overlay.codeMode = Prefs.codeMode(ctx) && !proxySwitch.isChecked
+        applyCodeZoom()
+    }
+
+    /** Im Code-Modus 2x zoomen: die Karte muss nicht so nah ans Handy (sonst stellt die Kamera nicht scharf). */
+    private fun applyCodeZoom() {
+        val cam = camera ?: return
+        val max = cam.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+        cam.cameraControl.setZoomRatio(if (overlay.codeMode) minOf(2f, max) else 1f)
     }
 
     override fun onResume() {
@@ -370,6 +411,12 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         val sure = card?.let { PrintPicker.matchText(it).take(1).let { m -> if (m.isNotBlank()) " $m" else "" } } ?: ""
         status.text = "＋ ${item.name.ifBlank { where.trim(' ', '·') }}$where$price$sure" + if (qty > 1) " (jetzt ${qty}×)" else ""
         refreshBatchButton()
+    }
+
+    override fun onDestroyView() {
+        codeJob?.cancel()
+        codeJob = null
+        super.onDestroyView()
     }
 
     override fun onDestroy() {
@@ -403,19 +450,38 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 .setResolutionSelector(analysisSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
-            analysis.setAnalyzer(executor) { proxy -> analyze(proxy) }
-            try {
+            analysis.setAnalyzer(executor) { frame -> analyze(frame) }
+            // Code-Modus: echte Fotos in voller Auflösung – die Schrift am Kartenrand ist nur ~1,5 mm hoch
+            val capture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setResolutionSelector(ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .build())
+                .build()
+            fun bind(withCapture: Boolean): Camera {
                 provider.unbindAll()
                 val viewPort = previewView.viewPort
-                camera = if (viewPort != null) {
-                    // gleicher sichtbarer Ausschnitt für Vorschau und Analyse -> exakte Rahmen-Umrechnung
-                    val group = UseCaseGroup.Builder().setViewPort(viewPort).addUseCase(preview).addUseCase(analysis).build()
+                val cases = listOfNotNull(preview, analysis, if (withCapture) capture else null)
+                return if (viewPort != null) {
+                    // gleicher sichtbarer Ausschnitt für alle -> exakte Rahmen-Umrechnung
+                    val group = UseCaseGroup.Builder().setViewPort(viewPort).apply { cases.forEach { addUseCase(it) } }.build()
                     viewportBound = true
                     provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, group)
                 } else {
                     viewportBound = false
-                    provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                    provider.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, *cases.toTypedArray())
                 }
+            }
+            try {
+                camera = try {
+                    bind(true).also { imageCapture = capture }
+                } catch (e: Exception) {
+                    imageCapture = null          // Gerät schafft nicht alle drei gleichzeitig -> Code-Modus über die Analyse
+                    bind(false)
+                }
+                applyCodeZoom()
+                startCodeLoop()
             } catch (e: Exception) {
                 status.text = "Kamera konnte nicht gestartet werden: ${e.message}"
             }
@@ -446,21 +512,163 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     }
 
     @androidx.annotation.OptIn(ExperimentalGetImage::class)
-    private fun analyze(proxy: ImageProxy) {
+    private fun analyze(frame: ImageProxy) {
         val now = SystemClock.elapsedRealtime()
-        val media = proxy.image
-        if (paused || media == null || now - lastAnalysis < 280) {
-            proxy.close()
+        val media = frame.image
+        // Im Code-Modus liest die Foto-Schleife (volle Auflösung) – die Vorschaubilder sind dafür zu klein
+        if (paused || media == null || now - lastAnalysis < 280 || (overlay.codeMode && imageCapture != null)) {
+            frame.close()
             return
         }
         lastAnalysis = now
-        val rot = proxy.imageInfo.rotationDegrees
-        val iw = if (rot % 180 == 0) proxy.width else proxy.height
-        val ih = if (rot % 180 == 0) proxy.height else proxy.width
-        val crop = if (viewportBound) uprightCrop(proxy.cropRect, proxy.width, proxy.height, rot) else null
+        val rot = frame.imageInfo.rotationDegrees
+        val iw = if (rot % 180 == 0) frame.width else frame.height
+        val ih = if (rot % 180 == 0) frame.height else frame.width
+        val crop = if (viewportBound) uprightCrop(frame.cropRect, frame.width, frame.height, rot) else null
         recognizer.process(InputImage.fromMediaImage(media, rot))
-            .addOnSuccessListener { text -> onText(text, iw, ih, crop) }
-            .addOnCompleteListener { proxy.close() }
+            .addOnCompleteListener { task ->
+                // Bild erst nach der Auswertung freigeben (Artwork-Ausschnitt wird daraus genommen)
+                try {
+                    if (task.isSuccessful) onText(task.result, iw, ih, crop, frame)
+                } finally {
+                    frame.close()
+                }
+            }
+    }
+
+    // ------------------------------------------------------------------ Code-Modus: Fotos in voller Auflösung
+    private fun startCodeLoop() {
+        codeJob?.cancel()
+        if (imageCapture == null) return
+        codeJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (true) {
+                if (overlay.codeMode && !paused && isResumed) {
+                    try {
+                        captureCode()
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        delay(500L)
+                    }
+                    delay(120L)
+                } else {
+                    delay(250L)
+                }
+            }
+        }
+    }
+
+    private suspend fun captureCode() {
+        val cap = imageCapture ?: return
+        val rect = overlay.cardRect ?: return
+        val vw = overlay.width.toFloat()
+        val vh = overlay.height.toFloat()
+        focusStrip(rect)
+        val strip: Bitmap = suspendCancellableCoroutine<Bitmap?> { cont ->
+            cap.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val bmp = try { cropStrip(image, rect, vw, vh) } catch (e: Exception) { null } finally { image.close() }
+                    if (cont.isActive) cont.resume(bmp)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    if (cont.isActive) cont.resume(null)
+                }
+            })
+        } ?: return
+        val lines = recognize(strip)
+        if (!overlay.codeMode || paused || view == null) return
+        // Der Ausschnitt ist der Streifen plus Rand – Region = Streifen
+        val padX = strip.width * STRIP_PAD_X / (1 + 2 * STRIP_PAD_X)
+        val padY = strip.height * STRIP_PAD_Y / (1 + 2 * STRIP_PAD_Y)
+        onCodeText(lines, Region(padX, padY, strip.width - padX, strip.height - padY))
+    }
+
+    private suspend fun recognize(bmp: Bitmap): List<OcrLine> = suspendCancellableCoroutine { cont ->
+        recognizer.process(InputImage.fromBitmap(bmp, 0))
+            .addOnSuccessListener { text ->
+                val lines = text.textBlocks.flatMap { it.lines }.mapNotNull { l ->
+                    l.boundingBox?.let { b -> OcrLine(l.text, b.left, b.top, b.right, b.bottom) }
+                }
+                if (cont.isActive) cont.resume(lines)
+            }
+            .addOnFailureListener { if (cont.isActive) cont.resume(emptyList()) }
+    }
+
+    /** Alle 2,5 s auf den Streifen scharfstellen (Nahbereich). */
+    private fun focusStrip(rect: RectF) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastFocus < 2500L) return
+        lastFocus = now
+        val point = previewView.meteringPointFactory.createPoint(rect.centerX(), rect.centerY())
+        camera?.cameraControl?.startFocusAndMetering(
+            FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                .setAutoCancelDuration(3, TimeUnit.SECONDS).build())
+    }
+
+    /** Streifen (plus Rand) aus dem Foto schneiden – nur dieser Teil wird dekodiert, dann aufrecht gedreht. */
+    @Suppress("DEPRECATION")
+    private fun cropStrip(image: ImageProxy, rect: RectF, vw: Float, vh: Float): Bitmap? {
+        val rot = image.imageInfo.rotationDegrees
+        val w = image.width
+        val h = image.height
+        val uw = (if (rot % 180 == 0) w else h).toFloat()
+        val uh = (if (rot % 180 == 0) h else w).toFloat()
+        val region = if (viewportBound) toCropRegion(rect, vw, vh, uprightCrop(image.cropRect, w, h, rot))
+        else toImageRegion(rect, vw, vh, uw, uh)
+        val padX = (region.right - region.left) * STRIP_PAD_X
+        val padY = (region.bottom - region.top) * STRIP_PAD_Y
+        val up = RectF(region.left - padX, region.top - padY, region.right + padX, region.bottom + padY)
+        if (!up.intersect(0f, 0f, uw, uh)) return null
+        val s = sensorRect(up, w, h, rot)
+        if (s.width() < 8 || s.height() < 8) return null
+        val part: Bitmap = if (image.format == ImageFormat.JPEG) {
+            val buf = image.planes[0].buffer
+            buf.rewind()
+            val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
+            BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)?.decodeRegion(s, null) ?: return null
+        } else {
+            val full = image.toBitmap()
+            Bitmap.createBitmap(full, s.left, s.top, s.width(), s.height())
+        }
+        val upright = if (rot != 0) Bitmap.createBitmap(part, 0, 0, part.width, part.height,
+            Matrix().apply { postRotate(rot.toFloat()) }, true) else part
+        val f = minOf(1f, 2200f / upright.width)
+        return if (f < 1f) Bitmap.createScaledBitmap(upright, (upright.width * f).toInt(), (upright.height * f).toInt(), true)
+        else upright
+    }
+
+    /** Umkehrung von uprightCrop: Rechteck in aufrechten Koordinaten -> Sensor-/Bildkoordinaten. */
+    private fun sensorRect(u: RectF, w: Int, h: Int, rot: Int): Rect {
+        val r = when (rot) {
+            90 -> RectF(u.top, h - u.right, u.bottom, h - u.left)
+            180 -> RectF(w - u.right, h - u.bottom, w - u.left, h - u.top)
+            270 -> RectF(w - u.bottom, u.left, w - u.top, u.right)
+            else -> RectF(u)
+        }
+        return Rect(r.left.toInt().coerceIn(0, w - 1), r.top.toInt().coerceIn(0, h - 1),
+            r.right.toInt().coerceIn(1, w), r.bottom.toInt().coerceIn(1, h))
+    }
+
+    /** Artwork-Bereich der Karte aus dem aktuellen Kamerabild (für den Artwork-Vergleich). */
+    private fun captureArt(frame: ImageProxy, card: Region): FloatArray? = try {
+        val full = frame.toBitmap()
+        val rot = frame.imageInfo.rotationDegrees
+        val upright = if (rot != 0) Bitmap.createBitmap(full, 0, 0, full.width, full.height,
+            Matrix().apply { postRotate(rot.toFloat()) }, false) else full
+        val w = card.right - card.left
+        val h = card.bottom - card.top
+        val l = (card.left + w * ArtMatcher.CARD_LEFT).toInt().coerceIn(0, upright.width - 2)
+        val t = (card.top + h * ArtMatcher.CARD_TOP).toInt().coerceIn(0, upright.height - 2)
+        val r = (card.left + w * ArtMatcher.CARD_RIGHT).toInt().coerceIn(l + 1, upright.width)
+        val b = (card.top + h * ArtMatcher.CARD_BOTTOM).toInt().coerceIn(t + 1, upright.height)
+        val art = Bitmap.createBitmap(upright, l, t, r - l, b - t)
+        ArtMatcher.signature(art).also {
+            art.recycle()
+            if (upright !== full) upright.recycle()
+            full.recycle()
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /** Rechnet den Rahmen aus View- in Bildkoordinaten um (PreviewView: FILL_CENTER). */
@@ -492,12 +700,22 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         setVotes.clear()
         cnVotes.clear()
         langVotes.clear()
+        totalVotes.clear()
+        artistVotes.clear()
+        yearVotes.clear()
         waitFrames = 0
     }
 
+    /**
+     * Sprache vom Kartenrand nur, wenn sie mehrfach gleich gelesen wurde und eine lateinische Schrift ist
+     * (Japanisch, Chinesisch … kann die Texterkennung gar nicht lesen – so ein Treffer ist ein Lesefehler).
+     */
+    private fun votedLang(votes: List<String>): String? =
+        mostCommon(votes)?.takeIf { l -> l in LATIN_LANGS && votes.count { it == l } >= 2 }
+
     private fun isBlocked(key: String) = blockedName?.let { similarity(it, key) >= 0.8 } ?: false
 
-    private fun onText(text: Text, iw: Int, ih: Int, crop: RectF?) {
+    private fun onText(text: Text, iw: Int, ih: Int, crop: RectF?, frame: ImageProxy) {
         if (paused || !isAdded || view == null) return
         val rect = overlay.cardRect ?: return
         val vw = overlay.width.toFloat()
@@ -535,8 +753,22 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         res.setCode?.let { setVotes += it }
         res.collectorNumber?.let { cnVotes += it }
         res.lang?.let { langVotes += it }
+        res.total?.let { totalVotes += it }
+        res.artist?.let { artistVotes += it }
+        res.year?.let { yearVotes += it }
         if (!voter.offer(key)) {
             status.text = "Erkenne: $name …"
+            return
+        }
+        if (proxy) {
+            // Proxy: Druck ist egal -> sofort mit dem Namen suchen (Standard-Druck)
+            voter.reset()
+            feedback.found(overlay)
+            val scan = res.copy(name = name, setCode = null, collectorNumber = null, lang = votedLang(langVotes),
+                total = null, artist = null, year = null)
+            resetVotes()
+            artSig = null
+            lookup(scan)
             return
         }
         if ((setVotes.isEmpty() || cnVotes.isEmpty()) && waitFrames < 3) {
@@ -547,8 +779,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         voter.reset()
         feedback.found(overlay)
         val scan = res.copy(name = name, setCode = mostCommon(setVotes) ?: res.setCode,
-            collectorNumber = mostCommon(cnVotes) ?: res.collectorNumber, lang = mostCommon(langVotes) ?: res.lang)
+            collectorNumber = mostCommon(cnVotes) ?: res.collectorNumber, lang = votedLang(langVotes),
+            total = mostCommon(totalVotes), artist = mostCommon(artistVotes), year = mostCommon(yearVotes))
         resetVotes()
+        // Artwork merken: unterscheidet bei unsicherem Druck die Editionen mit anderem Bild
+        artSig = if (!overlay.landscape && scan.setCode == null) captureArt(frame, region) else null
         lookup(scan)
     }
 
@@ -567,8 +802,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 blockedFailed = false
             }
             overlay.active = false
-            status.text = if (r.raw.isNotBlank()) "Lese … „${r.raw.take(40)}“"
-            else "Unteren Kartenrand in den Streifen halten (z.B. „0077“ und „FDN • DE“)"
+            status.text = when {
+                r.raw.isNotBlank() -> "Lese … „${r.raw.take(40)}“"
+                emptyFrames >= 6 -> "Nichts lesbar – Karte etwas weiter weg halten, Licht (⚡) einschalten"
+                else -> "Unteren Kartenrand in den Streifen halten (z.B. „0077“ und „FDN • DE“)"
+            }
             return
         }
         emptyFrames = 0
@@ -592,7 +830,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             status.text = "Lese ${set ?: "?"} #${cn ?: "?"} …" + if (r.raw.isNotBlank()) "  („${r.raw.take(30)}“)" else ""
             return
         }
-        val lang = mostCommon(codeLangVotes)
+        val lang = votedLang(codeLangVotes)
         clearCodeVotes()
         feedback.found(overlay)
         lookup(ScanResult(null, set, cn, emptyList(), lang))
@@ -617,14 +855,19 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         val name = scan.name ?: ""
         val label = scan.name ?: "${scan.setCode} #${scan.collectorNumber}"
         val blockKey = scan.name?.let { CardTextParser.normalize(it) } ?: "${scan.setCode}|${scan.collectorNumber}"
-        val preferSet = if (codeOnly) null else Prefs.fixedSet(requireContext()).ifBlank { Prefs.lastSet(requireContext()) }
+        val preferSet = if (codeOnly || proxy) null
+        else Prefs.fixedSet(requireContext()).ifBlank { Prefs.lastSet(requireContext()) }
         paused = true
         currentScan = scan
         status.text = "Suche „$label“ …"
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val card = Api.fromPrefs(requireContext()).lookup(scan.name, scan.setCode, scan.collectorNumber,
-                    scan.alternatives, langFor(scan), preferSet = preferSet)
+                val api = Api.fromPrefs(requireContext())
+                var card = api.lookup(scan.name, scan.setCode, scan.collectorNumber,
+                    scan.alternatives, langFor(scan), preferSet = preferSet,
+                    total = scan.total, artist = scan.artist, year = scan.year)
+                if (proxy && !codeOnly) card.put("match", "proxy")
+                else if (!codeOnly) card = refineByArt(api, card, preferSet)
                 rememberSet(card, codeOnly)
                 blockedFailed = false
                 when {
@@ -659,6 +902,36 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 }
                 paused = false
             }
+        }
+    }
+
+    /**
+     * Unsicherer Druck (nur Name / bevorzugte Edition / Hinweise): Artwork mit den Drucken vergleichen.
+     * Hilft bei Karten mit mehreren Artworks (z.B. alte Karten ohne Set-Code).
+     */
+    private suspend fun refineByArt(api: Api, card: JSONObject, preferSet: String?): JSONObject {
+        val sig = artSig ?: return card
+        artSig = null
+        val match = card.optString("match")
+        if (match !in listOf("name", "preferred", "likely")) return card
+        status.text = "Vergleiche Artwork …"
+        return try {
+            val arr = api.prints(card.optString("name").split(" // ").first()).getJSONArray("data")
+            val prints = (0 until arr.length()).map { arr.getJSONObject(it) }
+            val best = ArtMatcher.best(sig, prints) ?: return card
+            val ill = best.print.optString("illustration_id")
+            if (ill.isNotBlank() && ill == card.optString("illustration_id")) {
+                if (match == "name") card.put("match", "art") else card       // Artwork bestätigt den Druck
+            } else {
+                val group = prints.filter { it.optString("illustration_id") == ill }.ifEmpty { listOf(best.print) }
+                val pick = group.lastOrNull { !preferSet.isNullOrBlank() && it.optString("set_code").equals(preferSet, true) }
+                    ?: group.last()
+                api.lookup(null, scryfallId = pick.optString("scryfall_id"),
+                    lang = card.optString("lang").takeIf { it.isNotBlank() && it != "en" && it != "null" })
+                    .put("match", "art")
+            }
+        } catch (e: ApiException) {
+            card
         }
     }
 
@@ -905,3 +1178,7 @@ class RecentAdapter(
         holder.itemView.setOnClickListener { onClick(s) }
     }
 }
+
+private const val STRIP_PAD_X = 0.06f
+private const val STRIP_PAD_Y = 0.30f
+private val LATIN_LANGS = setOf("en", "de", "fr", "it", "es", "pt")
