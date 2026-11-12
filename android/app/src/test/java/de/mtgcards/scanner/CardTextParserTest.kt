@@ -93,29 +93,6 @@ class CardTextParserTest {
     fun normalize() {
         assertEquals("lim dul s vault", CardTextParser.normalize("Lim-Dûl's Vault"))
     }
-}
-
-class CandidateVoterTest {
-    @Test
-    fun similarReadingsConfirm() {
-        val v = CandidateVoter()
-        assertEquals(false, v.offer("atraxa praetors voice"))
-        assertEquals(true, v.offer("atraxa praetors voioe"))
-    }
-
-    @Test
-    fun differentCardsDoNotConfirm() {
-        val v = CandidateVoter()
-        assertEquals(false, v.offer("sol ring"))
-        assertEquals(false, v.offer("arcane signet"))
-        assertEquals(true, v.offer("arcane signet"))
-    }
-
-    @Test
-    fun similarityValues() {
-        assertEquals(1.0, similarity("abc", "abc"), 0.0)
-        assertEquals(0.75, similarity("abcd", "abce"), 0.001)
-    }
 
     @Test
     fun oldCardNumberWithSetSize() {
@@ -142,5 +119,28 @@ class CandidateVoterTest {
         assertEquals("Christopher Rush", r.artist)
         assertEquals("1995", r.year)
         assertNull(r.total)
+    }
+}
+
+class CandidateVoterTest {
+    @Test
+    fun similarReadingsConfirm() {
+        val v = CandidateVoter()
+        assertEquals(false, v.offer("atraxa praetors voice"))
+        assertEquals(true, v.offer("atraxa praetors voioe"))
+    }
+
+    @Test
+    fun differentCardsDoNotConfirm() {
+        val v = CandidateVoter()
+        assertEquals(false, v.offer("sol ring"))
+        assertEquals(false, v.offer("arcane signet"))
+        assertEquals(true, v.offer("arcane signet"))
+    }
+
+    @Test
+    fun similarityValues() {
+        assertEquals(1.0, similarity("abc", "abc"), 0.0)
+        assertEquals(0.75, similarity("abcd", "abce"), 0.001)
     }
 }
