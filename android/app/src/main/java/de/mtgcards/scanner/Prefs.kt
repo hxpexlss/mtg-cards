@@ -2,6 +2,9 @@ package de.mtgcards.scanner
 
 import android.content.Context
 
+/** Token säubern: Leerzeichen (z.B. von der Tastatur nach "-" eingefügt) entfernen, Großbuchstaben. */
+fun cleanToken(t: String) = t.uppercase().filter { it.isLetterOrDigit() || it == '-' }
+
 object Prefs {
     private fun sp(ctx: Context) = ctx.getSharedPreferences("mtgcards", Context.MODE_PRIVATE)
 
@@ -22,7 +25,7 @@ object Prefs {
     fun fingerprint(ctx: Context): String = sp(ctx).getString("fingerprint", "") ?: ""
 
     fun saveServer(ctx: Context, url: String, token: String, fingerprint: String? = null) {
-        val e = sp(ctx).edit().putString("server_url", url).putString("token", token.trim().uppercase())
+        val e = sp(ctx).edit().putString("server_url", url).putString("token", cleanToken(token))
         if (fingerprint != null) e.putString("fingerprint", fingerprint)
         e.apply()
     }

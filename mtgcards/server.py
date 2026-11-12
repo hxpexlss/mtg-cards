@@ -56,6 +56,10 @@ class AppContext:
         return None
 
 
+def normalize_token(t):
+    return re.sub(r"[^A-Z0-9]", "", (t or "").upper())
+
+
 def _first(qs, key, default=""):
     v = qs.get(key)
     return v[0] if v else default
@@ -125,8 +129,10 @@ class Handler(BaseHTTPRequestHandler):
         token = self.ctx.token
         if not token:
             return
-        given = (self._token_from_request(qs) or "").strip().upper()
-        if not hmac.compare_digest(given.encode(), token.strip().upper().encode()):
+        # Vergleich ohne Leerzeichen/Bindestriche und unabhängig von Groß-/Kleinschreibung,
+        # damit z.B. von der Handy-Tastatur eingefügte Leerzeichen nicht stören.
+        given = normalize_token(self._token_from_request(qs) or "")
+        if not given or not hmac.compare_digest(given.encode(), normalize_token(token).encode()):
             raise ApiError(401, "Nicht autorisiert – Zugangs-Token fehlt oder ist falsch")
 
     def is_loopback(self):

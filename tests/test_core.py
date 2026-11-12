@@ -157,6 +157,10 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(self.call("/api/cards", token=None)[0], 401)
         self.assertEqual(self.call("/api/cards", token="falsch")[0], 401)
         self.assertEqual(self.call("/api/cards", token=tok.lower())[0], 200)  # Groß/klein egal
+        self.assertEqual(self.call("/api/cards", token="ABCD-EFGH- JKLM-NPQR")[0], 200)  # Leerzeichen egal
+        self.assertEqual(self.call("/api/cards", token="ABCDEFGHJKLMNPQR")[0], 200)      # ohne Bindestriche
+        self.assertEqual(self.call("/api/cards", token="ABCD-EFGH-JKLM-NPQX")[0], 401)
+        self.assertEqual(self.call("/api/cards", token="- -")[0], 401)
 
         st, card = self.call("/api/lookup?name=atraxa%20praetors%20voice", token=tok)
         self.assertEqual(st, 200)

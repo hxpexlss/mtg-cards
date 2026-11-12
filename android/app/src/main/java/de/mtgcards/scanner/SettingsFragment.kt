@@ -39,7 +39,8 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
 
     private fun saveAndTest(fingerprint: String? = null) {
         val u = Api.normalizeUrl(url.text.toString())
-        val t = token.text.toString().trim().uppercase()
+        val t = cleanToken(token.text.toString())
+        token.setText(t)
         url.setText(u)
         val ctx = requireContext()
         // Fingerabdruck nur behalten, wenn die Adresse gleich bleibt

@@ -649,7 +649,7 @@ function bind() {
   $("#add-form").addEventListener("submit", submitAdd);
 
   $("#login-form").addEventListener("submit", () => {
-    state.token = $("#login-token").value.trim();
+    state.token = $("#login-token").value.replace(/\s+/g, "").toUpperCase();
     store("mtg-token", state.token);
     loadCards();
   });
