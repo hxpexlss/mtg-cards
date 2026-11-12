@@ -214,10 +214,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             }
         }
         overlay.landscape = Prefs.landscape(ctx)
+        val guide = this.overlay   // in apply{} wäre "overlay" die View-Eigenschaft des Schalters
         view.findViewById<MaterialSwitch>(R.id.landscapeMode).apply {
-            isChecked = overlay.landscape
+            isChecked = guide.landscape
             setOnCheckedChangeListener { _, on ->
-                overlay.landscape = on
+                guide.landscape = on
                 Prefs.setLandscape(ctx, on)
                 voter.reset()
                 refreshModeInfo()
