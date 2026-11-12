@@ -118,6 +118,16 @@ def _as_list(v):
     return [v]
 
 
+def fold(s):
+    """Für die Suche: klein, ohne Akzente/Umlaute, ß -> ss ("Überraschung" findet "uberraschung")."""
+    if s is None:
+        return None
+    import unicodedata
+    s = str(s).replace("ß", "ss").replace("ẞ", "ss")
+    s = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+
+
 def _bool(v):
     if isinstance(v, str):
         return v.strip().lower() in ("1", "true", "yes", "ja", "foil", "y", "x", "etched")
@@ -132,6 +142,7 @@ class Database:
         self._lock = threading.RLock()
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self.conn.create_function("fold", 1, fold, deterministic=True)
         with self._lock:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.executescript(SCHEMA)
@@ -425,9 +436,11 @@ class Database:
             vals.append(dup_min)
         for term in (q or "").split():
             like = _like(term)
-            where.append("(name LIKE ? ESCAPE '\\' OR printed_name LIKE ? ESCAPE '\\' OR type_line LIKE ? ESCAPE '\\'"
-                         " OR oracle_text LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')")
-            vals += [like] * 6
+            folded = _like(fold(term))
+            where.append("(fold(name) LIKE ? ESCAPE '\\' OR fold(printed_name) LIKE ? ESCAPE '\\'"
+                         " OR type_line LIKE ? ESCAPE '\\' OR oracle_text LIKE ? ESCAPE '\\'"
+                         " OR tags LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')")
+            vals += [folded] * 2 + [like] * 4
         if type_:
             where.append("type_line LIKE ? ESCAPE '\\'")
             vals.append(_like(type_))

@@ -30,7 +30,11 @@ M11 = bolt("m11", "149", released="2010-07-16")
 FDN = bolt("fdn", "77", released="2024-11-15", ill="ill-c", prices={"eur": "0.30", "usd": "0.40"})
 FDN_DE = bolt("fdn", "77", "de", "Blitzschlag", released="2024-11-15", ill="ill-c")
 FDN_JA = bolt("fdn", "77", "ja", "稲妻", released="2024-11-15", ill="ill-c")
-CARDS = {(c["set"], c["collector_number"], c["lang"]): c for c in (LEA, M10, M11, FDN, FDN_DE, FDN_JA)}
+EMBLEM = {"id": "emb", "oracle_id": "emb-o", "name": "Chandra, Torch of Defiance Emblem", "lang": "en",
+          "set": "tkld", "set_name": "Kaladesh Tokens", "collector_number": "10", "layout": "emblem",
+          "type_line": "Emblem — Chandra", "oracle_text": "Whenever you cast a spell, this emblem deals 5 damage.",
+          "color_identity": [], "colors": [], "keywords": [], "prices": {}}
+CARDS = {(c["set"], c["collector_number"], c["lang"]): c for c in (LEA, M10, M11, FDN, FDN_DE, FDN_JA, EMBLEM)}
 SETS = [{"code": "lea", "card_count": 295}, {"code": "m10", "card_count": 249, "printed_size": 249},
         {"code": "m11", "card_count": 249}, {"code": "fdn", "card_count": 730, "printed_size": 271}]
 
@@ -59,6 +63,11 @@ class FakeApi(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         parts = u.path.strip("/").split("/")
+        if u.path == "/cards/autocomplete":
+            names = ["Lightning Bolt"] if "light" in q["q"].lower() else []
+            if q.get("include_extras") and "chandra" in q["q"].lower():
+                names = [EMBLEM["name"], "Chandra // Chandra"]
+            return self.send({"data": names})
         if u.path == "/sets":
             return self.send({"data": SETS})
         if parts[0] == "cards" and len(parts) in (3, 4) and parts[1] not in ("named", "search"):
@@ -68,12 +77,18 @@ class FakeApi(BaseHTTPRequestHandler):
             if q.get("fuzzy", "").lower() != "lightning bolt":
                 return self.send({"details": "nicht gefunden"}, 404)
             s = q.get("set")
-            hit = [c for c in CARDS.values() if c["lang"] == "en" and (not s or c["set"] == s)]
+            hit = [c for c in CARDS.values() if c["lang"] == "en" and c["name"] == "Lightning Bolt" and (not s or c["set"] == s)]
             return self.send(hit[-1]) if hit else self.send({"details": "nicht in Edition"}, 404)
         if u.path == "/cards/search":
-            qq = q.get("q", "")
+            qq = q.get("q", "").replace(" include:extras", "")
             if qq == '!"Lightning Bolt"':
                 return self.send({"data": [LEA, M10, M11, FDN]})
+            if qq.startswith("t:emblem") and "chandra" in qq.lower():
+                return self.send({"data": [EMBLEM]})
+            if qq == '!"Chandra, Torch of Defiance Emblem"':
+                return self.send({"data": [EMBLEM]})
+            if qq == "Blitzsch lang:any":
+                return self.send({"data": [FDN_JA, FDN_DE]})
             if qq == '!"Lightning Bolt" lang:de':
                 return self.send({"data": [FDN_DE]})
             if "Blitzschlag" in qq and "lang:any" in qq:
@@ -128,6 +143,21 @@ class TestLanguageAndPrices(unittest.TestCase):
         out = self.sf.fill_prices({"a": FDN_DE, "b": M10})
         self.assertEqual(out["a"]["prices"]["eur"], "0.30")
         self.assertEqual(out["b"]["prices"]["eur"], "2.00")
+
+    def test_emblem_by_type_line_and_token_set(self):
+        c = self.sf.lookup_any(name="Emblem — Chandra")
+        self.assertEqual((c["name"], c["_match"]), (EMBLEM["name"], "name"))
+        c = self.sf.lookup_any(name="Emblem Chandra", set_code="KLD")
+        self.assertEqual((c["set"], c["_match"]), ("tkld", "set"))
+        c = self.sf.lookup_any(name="Emblem", set_code="KLD", collector_number="10")
+        self.assertEqual((c["set"], c["_match"]), ("tkld", "exact"))
+
+    def test_emblem_by_full_name(self):
+        self.assertEqual(self.sf.lookup_any(name="Chandra, Torch of Defiance Emblem")["id"], "emb")
+
+    def test_autocomplete_extras_and_german(self):
+        self.assertEqual(self.sf.autocomplete("chandra"), [EMBLEM["name"]])
+        self.assertIn("Blitzschlag", self.sf.autocomplete("Blitzsch"))
 
     def test_prints_in_language(self):
         self.assertEqual([p["lang"] for p in self.sf.prints("Lightning Bolt", "de")], ["de"])

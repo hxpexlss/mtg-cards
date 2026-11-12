@@ -4,6 +4,16 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [2.0.1] – 2026-11-12
+
+### Behoben
+- **Embleme ließen sich weder scannen noch suchen:** Scryfall führt Embleme (wie Spielsteine) als „Extras“, die bei
+  Namenssuche und Vorschlägen ausgeblendet sind. Jetzt werden sie mitgesucht – auch über die Typzeile
+  („Emblem — Chandra“, auf der Karte steht oben oft nur „Emblem“) und mit den Token-Editionen (KLD → TKLD).
+- **Deutsche Namen in der Suche:** Namensvorschläge (Hinzufügen, Decks, Wunschliste) finden jetzt auch gedruckte
+  Namen anderer Sprachen („Blitzsch…“ → „Blitzschlag“), „Druck ändern“ funktioniert mit deutschen Namen.
+- **Sammlungssuche** unabhängig von Groß-/Kleinschreibung bei Umlauten und mit ß/ss („über“, „Über“, „uber“).
+
 ## [2.0.0] – 2026-11-12
 
 Fehlerkorrekturen nach einer kompletten Durchsicht von Server, Weboberfläche und App. Das Datenbank-Format bleibt

@@ -31,7 +31,8 @@ class ScryfallError(Exception):
 
 
 def _norm(s):
-    s = unicodedata.normalize("NFKD", s or "")
+    s = (s or "").replace("ß", "ss").replace("ẞ", "SS")
+    s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
@@ -41,6 +42,9 @@ def name_matches(query, card, threshold=0.75):
     q = _norm(query)
     if not q:
         return True
+    if q.startswith("emblem") and _is_emblem_card(card):
+        sub = q[len("emblem"):].strip()
+        return not sub or sub in _norm(card.get("type_line")) or sub in _norm(card.get("name"))
     candidates = [card.get("name"), card.get("printed_name")]
     for face in card.get("card_faces") or []:
         candidates += [face.get("name"), face.get("printed_name")]
@@ -53,6 +57,16 @@ def name_matches(query, card, threshold=0.75):
         if difflib.SequenceMatcher(None, q, c).ratio() >= threshold:
             return True
     return False
+
+
+def _is_emblem_card(card):
+    return (card.get("type_line") or "").startswith("Emblem") or card.get("layout") == "emblem"
+
+
+def token_set_variants(code):
+    """Spielsteine/Embleme liegen bei Scryfall in eigenen Editionen mit "T" davor (KLD -> TKLD)."""
+    code = (code or "").upper()
+    return [code] + ([f"T{code}"] if code and not code.startswith("T") and len(code) <= 4 else [])
 
 
 def sort_colors(colors):
@@ -414,9 +428,46 @@ class Scryfall:
         return raws
 
     def autocomplete(self, q):
+        """Namensvorschläge – inkl. Embleme und Spielsteine (bei Scryfall "Extras", sonst ausgeblendet)."""
         if len(q.strip()) < 2:
             return []
-        return self._get("/cards/autocomplete", {"q": q}).get("data", [])
+        names = list(self._get("/cards/autocomplete", {"q": q}).get("data", []))
+        try:
+            extras = self._get("/cards/autocomplete", {"q": q, "include_extras": "true"}).get("data", [])
+        except ScryfallError:
+            extras = []
+        names += [n for n in extras if n not in names and " // " not in n]      # ohne Art-Series-Karten
+        if len(names) < 8 and sum(ch.isalpha() for ch in q) >= 3:
+            names += [n for n in self.foreign_names(q) if n not in names]
+        return names[:30]
+
+    def foreign_names(self, q, limit=12):
+        """Gedruckte Namen anderer Sprachen (z.B. "Blitzsch" -> "Blitzschlag"), für die Namensvorschläge."""
+        words = " ".join(w for w in re.split(r"\s+", q.replace('"', "")) if w)
+        try:
+            data = self._get("/cards/search", {"q": f"{words} lang:any include:extras", "unique": "prints",
+                                               "order": "name"})
+        except ScryfallError:
+            return []
+        nq = _norm(q)
+        out = []
+        for c in data.get("data") or []:
+            for printed in [c.get("printed_name")] + [f.get("printed_name") for f in c.get("card_faces") or []]:
+                if printed and nq in _norm(printed) and printed not in out:
+                    out.append(printed)
+        out.sort(key=lambda n: (not _norm(n).startswith(nq), len(n)))
+        return out[:limit]
+
+    def emblems(self, subtype=None):
+        """Alle Embleme (optional eines Planeswalkers, z.B. "Chandra"), neueste zuerst."""
+        q = "t:emblem include:extras" + (f' t:"{subtype}"' if subtype else "")
+        try:
+            data = self._get("/cards/search", {"q": q, "unique": "cards", "order": "released", "dir": "desc"})
+        except ScryfallError as e:
+            if e.status == 404:
+                return []
+            raise
+        return data.get("data", [])
 
     def prints(self, name, lang=None, max_age=None, max_pages=6):
         """Alle Drucke einer Karte (exakter Name), optional in einer Sprache (z.B. "de").
@@ -425,7 +476,7 @@ class Scryfall:
         Seiten – die werden mitgeladen, sonst fehlt z.B. der günstigste Druck. max_age: siehe _get().
         """
         safe = name.replace('"', "")
-        q = f'!"{safe}"'
+        q = f'!"{safe}" include:extras'
         lang = (lang or "").lower()
         if lang and lang not in ("en", "auto"):
             q += " lang:any" if lang == "any" else f" lang:{lang}"
@@ -517,7 +568,7 @@ class Scryfall:
 
         # 1) Set-Code + Sammlernummer (mit typischen OCR-Verwechslungen im Set-Code: 0/O, 1/I, 5/S …)
         if set_code and collector_number:
-            for code in set_code_variants(set_code):
+            for code in [v for c in set_code_variants(set_code) for v in token_set_variants(c)]:
                 for lg in ([lang, None] if lang and lang.lower() not in ("en", "auto") else [None]):
                     try:
                         card = self.by_set_number(code, collector_number, lg)
@@ -535,8 +586,17 @@ class Scryfall:
         if not name:
             raise ScryfallError("Kein Kartenname angegeben", 400)
 
+        # Emblem-Karten: oben steht meist nur "Emblem", der Planeswalker in der Typzeile ("Emblem — Chandra")
+        if _norm(name).startswith("emblem") and not _norm(name).endswith(" emblem"):
+            card = self._emblem(name, set_code, prefer_set)
+            if card:
+                return card
+            if _norm(name) == "emblem":
+                raise ScryfallError("Emblem erkannt, aber der Planeswalker ist nicht lesbar – "
+                                    "Typzeile „Emblem — …“ mit in den Rahmen halten", 404)
+
         # 2) Name + gelesener Set-Code
-        for code in set_code_variants(set_code) if set_code else []:
+        for code in [v for c in set_code_variants(set_code) for v in token_set_variants(c)] if set_code else []:
             card = self._named_in_set(name, code, collector_number)
             if card:
                 return dict(_tag(card, "set"), _name_lang=_printed_lang(name, card))
@@ -567,20 +627,51 @@ class Scryfall:
             if e.status not in (400, 404):
                 raise
             last = e
-        # Fremdsprachige Namen (z.B. deutsche Karten) über die Volltextsuche
         safe = name.replace('"', "")
+        # Embleme / Spielsteine ("Elspeth, Knight-Errant Emblem") sind bei Scryfall "Extras"
         try:
-            data = self.search(f'"{safe}" lang:any', unique="prints", order="released")
+            data = self.search(f'!"{safe}" include:extras', unique="cards", order="released")
+            if data.get("data"):
+                return data["data"][0]
+        except ScryfallError as e:
+            if e.status not in (400, 404):
+                raise
+        # Fremdsprachige Namen (z.B. deutsche Karten) über die Volltextsuche
+        try:
+            data = self.search(f'"{safe}" lang:any include:extras', unique="prints", order="released")
             results = data.get("data") or []
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise
             results = []
         matches = [c for c in results if name_matches(name, c, threshold=0.7)]
+        if not matches:
+            # ohne Anführungszeichen: findet auch "Uberraschung" (ohne Umlaut) oder Teilnamen
+            words = " ".join(w for w in re.split(r"\s+", safe) if len(w) >= 2)
+            try:
+                data = self.search(f"{words} lang:any include:extras", unique="prints", order="released")
+                matches = [c for c in data.get("data") or [] if name_matches(name, c, threshold=0.7)]
+            except ScryfallError as e:
+                if e.status not in (400, 404):
+                    raise
         if matches:
             # Bester Treffer: gedruckter Name am ähnlichsten, bei Gleichstand lateinische Sprachen zuerst
             return max(matches, key=lambda c: (_similarity(name, c), (c.get("lang") or "en") not in NON_LATIN_LANGS))
         raise ScryfallError(f'Keine Karte gefunden für "{name}"', 404) from last
+
+    def _emblem(self, name, set_code=None, prefer_set=None):
+        """Emblem über den Planeswalker-Namen aus der Typzeile ("Emblem — Chandra")."""
+        sub = _norm(name)[len("emblem"):].strip()
+        cands = self.emblems(sub.split(" ")[0] if sub else None) if sub else []
+        if not cands:
+            return None
+        sets = [c.lower() for c in (token_set_variants(set_code) + token_set_variants(prefer_set)) if c]
+        for code in sets:
+            hit = [c for c in cands if (c.get("set") or "").lower() == code]
+            if hit:
+                return _tag(hit[0], "set" if set_code and code in [v.lower() for v in token_set_variants(set_code)]
+                            else "preferred")
+        return _tag(cands[0], "name")       # neuestes Emblem dieses Planeswalkers – bitte prüfen
 
     def _named_in_set(self, name, code, collector_number=None):
         """Karte per Name in einer bestimmten Edition – englischer oder fremdsprachiger Name.
@@ -595,7 +686,7 @@ class Scryfall:
             return card
         safe = name.replace('"', "")
         try:
-            data = self.search(f'"{safe}" lang:any e:{code.lower()}', unique="prints", order="released")
+            data = self.search(f'"{safe}" lang:any include:extras e:{code.lower()}', unique="prints", order="released")
         except ScryfallError as e:
             if e.status not in (400, 404):
                 raise

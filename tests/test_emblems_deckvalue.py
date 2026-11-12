@@ -73,6 +73,14 @@ class TestDeckValue(unittest.TestCase):
         self.assertEqual(store.list()[0]["stats"]["value_eur"], 12.5)
 
 
+class TestUmlautSearch(unittest.TestCase):
+    def test_umlauts_and_case(self):
+        db = Database(":memory:")
+        db.add(normalize_card(dict(ATRAXA_DE, printed_name="Über die Straße")))
+        for q in ("über", "ÜBER", "uber", "strasse", "Straße", "atraxa"):
+            self.assertEqual(len(db.search(q=q)[0]), 1, q)
+
+
 class TestChangePrint(unittest.TestCase):
     def test_change_language_and_merge(self):
         db = Database(":memory:")
