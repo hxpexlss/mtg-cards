@@ -311,7 +311,11 @@ dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(3px); }
 .deck-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .deck-item { padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
 .deck-item.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.deck-item .t { font-weight: 600; }
+.deck-item .t { font-weight: 600; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.pill.status-owned { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); font-size: 10px; padding: 1px 7px; }
+.pill.status-build { background: color-mix(in srgb, var(--accent2) 22%, transparent); color: var(--accent2); font-size: 10px; padding: 1px 7px; }
+.deck-filter { display: flex; }
+.deck-filter button { flex: 1; }
 .deck-item .s { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; align-items: center; }
 .progress { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
 .progress > div { height: 100%; background: var(--ok); }

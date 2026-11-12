@@ -38,6 +38,7 @@ class DeckActivity : AppCompatActivity() {
             deck?.let { d -> render(d) }
         }
         findViewById<Button>(R.id.deckShare).setOnClickListener { shareMissing() }
+        findViewById<Button>(R.id.deckStatus).setOnClickListener { toggleStatus() }
         findViewById<Button>(R.id.deckProxies).setOnClickListener {
             ProxyPdf.ask(this, lifecycleScope, "/api/decks/$deckId/proxies.pdf?missing=1", "proxies-deck-$deckId.pdf")
         }
@@ -57,7 +58,23 @@ class DeckActivity : AppCompatActivity() {
         }
     }
 
+    private fun toggleStatus() {
+        val d = deck ?: return
+        val next = if (d.optString("status") == "owned") "build" else "owned"
+        lifecycleScope.launch {
+            try {
+                val res = Api.fromPrefs(this@DeckActivity).deckUpdate(deckId, JSONObject().put("status", next))
+                deck = res
+                render(res)
+            } catch (e: ApiException) {
+                Toast.makeText(this@DeckActivity, e.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun render(d: JSONObject) {
+        findViewById<Button>(R.id.deckStatus).text =
+            if (d.optString("status") == "owned") "Status: Besitz  (antippen → Bau)" else "Status: Bau  (antippen → Besitz)"
         val st = d.getJSONObject("stats")
         findViewById<TextView>(R.id.deckTitle).text = d.optString("name")
         val ci = d.optString("color_identity")

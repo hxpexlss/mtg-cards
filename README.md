@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.7.0_all.deb
+sudo apt install ./mtg-cards-desktop_1.8.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.7.0_all.deb
+sudo apt install ./mtg-cards-server_1.8.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -123,6 +123,8 @@ sofort da, und bereits bekannte Karten lassen sich auch ohne Internet nachschlag
 
 Tab **Decks** in der Desktop-/Weboberfläche:
 
+- **Status je Deck:** **Besitz** (Deck ist gebaut/vorhanden) oder **Bau** (Deck, das du zusammenstellen willst) –
+  beim Anlegen wählbar, jederzeit umschaltbar; die Deck-Liste lässt sich danach filtern (PC und App).
 - **Neues Deck** → Name und optional eine Deckliste einfügen. Verstanden werden die üblichen Formate von Moxfield,
   Archidekt, MTG Arena und MTGO (`1 Sol Ring`, `1x Sol Ring`, `1 Sol Ring (C21) 263`, Abschnitte `Commander`,
   `Deck`, `Sideboard`, Markierung `*CMDR*`).

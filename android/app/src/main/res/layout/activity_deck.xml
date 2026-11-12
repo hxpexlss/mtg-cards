@@ -70,6 +70,12 @@
             </LinearLayout>
 
             <Button
+                android:id="@+id/deckStatus"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <Button
                 android:id="@+id/deckProxies"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"

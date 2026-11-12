@@ -4,7 +4,7 @@ Gemeinsamer Kern für die Desktop-Anwendung und den Headless-Server.
 Nutzt ausschließlich die Python-Standardbibliothek.
 """
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 APP_NAME = "mtg-cards"
 DEFAULT_PORT = 8765
 DISCOVERY_PORT = 47811

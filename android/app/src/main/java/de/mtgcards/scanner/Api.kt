@@ -218,6 +218,9 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun deck(id: Long) = json("GET", "/api/decks/$id")
 
+    /** Deck ändern (z.B. Status "owned" = Besitz / "build" = Bau). */
+    suspend fun deckUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/decks/$id", changes)
+
     suspend fun deckMissingText(id: Long) = request("GET", "/api/decks/$id/export?missing=1")
 
     /** PUT wird vom Server wie PATCH behandelt (HttpURLConnection kann kein PATCH). */

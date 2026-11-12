@@ -520,7 +520,8 @@ def r_decks(h, qs):
 def r_deck_create(h, qs):
     data = h.read_json()
     try:
-        deck = h.ctx.decks.create(data.get("name"), data.get("format") or "commander", data.get("notes") or "")
+        deck = h.ctx.decks.create(data.get("name"), data.get("format") or "commander", data.get("notes") or "",
+                                  status=data.get("status") or "build")
     except ValueError as e:
         raise ApiError(400, str(e)) from None
     result = {"deck": deck, "errors": []}

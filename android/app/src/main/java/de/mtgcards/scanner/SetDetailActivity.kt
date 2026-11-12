@@ -23,6 +23,7 @@ class SetDetailActivity : AppCompatActivity() {
         setContentView(R.layout.activity_deck)
         findViewById<View>(R.id.deckBack).setOnClickListener { finish() }
         findViewById<View>(R.id.deckProxies).visibility = View.GONE
+        findViewById<View>(R.id.deckStatus).visibility = View.GONE
         val filter = findViewById<Button>(R.id.deckFilter)
         val scope = findViewById<Button>(R.id.deckShare)
         filter.text = "Alle zeigen"

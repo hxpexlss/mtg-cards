@@ -1,7 +1,8 @@
 "use strict";
 /* MTG Cards – Deck-Verwaltung (nutzt Hilfsfunktionen aus app.js) */
 
-const decks = { current: null, list: [], formMode: "new" };
+const decks = { current: null, list: [], formMode: "new", filter: "all" };
+const STATUS_LABEL = { owned: "Besitz", build: "Bau" };
 const BOARD_TITLES = { side: "Sideboard", maybe: "Vielleicht" };
 const GROUP_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact",
   "Enchantment", "Land", "Sonstige", "Sideboard", "Vielleicht"];
@@ -36,15 +37,17 @@ async function loadDecks(selectId) {
 }
 
 function renderDeckList() {
-  $("#deck-list").innerHTML = decks.list.map((d) => {
+  const shown = decks.list.filter((d) => decks.filter === "all" || d.status === decks.filter);
+  $$("#deck-filter button").forEach((b) => b.classList.toggle("active", b.dataset.df === decks.filter));
+  $("#deck-list").innerHTML = shown.map((d) => {
     const pct = d.stats.cards ? Math.round(100 * d.stats.owned / d.stats.cards) : 0;
     return `<div class="deck-item ${decks.current && decks.current.id === d.id ? "active" : ""}" data-deck="${d.id}">
-      <div class="t">${esc(d.name)}</div>
+      <div class="t">${esc(d.name)} <span class="pill status-${esc(d.status)}">${esc(STATUS_LABEL[d.status] || "Bau")}</span></div>
       <div class="s"><span>${esc(d.commanders.join(" & ") || d.format)}</span>${d.commanders.length ? ciHtml(d.color_identity) : ""}</div>
       <div class="s"><span>${d.stats.cards} Karten</span><span>${d.stats.missing ? d.stats.missing + " fehlen" : "✓ komplett"}</span></div>
       <div class="progress"><div style="width:${pct}%"></div></div>
     </div>`;
-  }).join("") || `<p class="muted small">Noch keine Decks.</p>`;
+  }).join("") || `<p class="muted small">${decks.list.length ? "Keine Decks mit diesem Status." : "Noch keine Decks."}</p>`;
 }
 
 function renderDeckEmpty() {
@@ -75,6 +78,10 @@ function renderDeck(d) {
   $("#deck-main").innerHTML = `
     <div class="deck-head">
       <h2>${esc(d.name)}</h2> ${d.commanders.length ? ciHtml(d.color_identity) : ""}
+      <div class="seg" title="Status des Decks">
+        <button data-dstatus="owned" class="${d.status === "owned" ? "active" : ""}">Besitz</button>
+        <button data-dstatus="build" class="${d.status !== "owned" ? "active" : ""}">Bau</button>
+      </div>
       <span class="muted">${esc(d.format)}</span>
       <span class="spacer"></span>
       <button class="btn small" data-dact="import">⇩ Liste einfügen</button>
@@ -239,6 +246,8 @@ function openDeckForm(mode) {
   decks.formMode = mode;
   $("#deck-form-title").textContent = mode === "new" ? "Neues Deck" : `Liste einfügen – ${decks.current.name}`;
   $("#deck-name-wrap").classList.toggle("hidden", mode !== "new");
+  $("#deck-status-wrap").classList.toggle("hidden", mode !== "new");
+  $("#deck-status").value = "build";
   $("#deck-replace-wrap").classList.toggle("hidden", mode === "new");
   $("#deck-name").value = "";
   $("#deck-list-text").value = "";
@@ -260,7 +269,7 @@ async function submitDeckForm(ev) {
     if (decks.formMode === "new") {
       const name = $("#deck-name").value.trim();
       if (!name) { toast("Bitte einen Namen eingeben", "err"); return; }
-      const r = await api("/api/decks", { method: "POST", json: { name, list: text } });
+      const r = await api("/api/decks", { method: "POST", json: { name, list: text, status: $("#deck-status").value } });
       errors = r.errors;
       id = r.deck.id;
     } else {
@@ -300,6 +309,12 @@ async function fillDeckSelect(sel) {
 function bindDecks() {
   $$(".tabs button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
   $("#deck-new").onclick = () => openDeckForm("new");
+  $("#deck-filter").onclick = (e) => {
+    const b = e.target.closest("[data-df]");
+    if (!b) return;
+    decks.filter = b.dataset.df;
+    renderDeckList();
+  };
   $("#deck-form").addEventListener("submit", submitDeckForm);
   $("#deck-list").onclick = (e) => {
     const el = e.target.closest("[data-deck]");
@@ -309,6 +324,13 @@ function bindDecks() {
   main.addEventListener("click", (e) => {
     const a = e.target.closest("[data-dact]");
     if (a) return deckAction(a.dataset.dact);
+    const st = e.target.closest("[data-dstatus]");
+    if (st) {
+      api(`/api/decks/${decks.current.id}`, { method: "PATCH", json: { status: st.dataset.dstatus } })
+        .then((d) => { decks.current = d; renderDeck(d); refreshDeckSummary(); })
+        .catch((err) => toast(err.message, "err"));
+      return;
+    }
     const op = e.target.closest("[data-op]");
     if (op) return deckCardOp(op.closest("[data-dc]").dataset.dc, op.dataset.op);
   });

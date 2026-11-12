@@ -74,6 +74,19 @@ class TestDeckStore(unittest.TestCase):
         self.assertEqual(len(DeckStore(other).list()), 1)
         self.assertEqual(json.loads(data)["decks"][0]["name"], "Atraxa Superfriends")
 
+    def test_status_owned_build(self):
+        a = self.store.create("Precon", status="owned")
+        b = self.store.create("Neues Deck")
+        self.assertEqual((a["status"], b["status"]), ("owned", "build"))
+        self.assertEqual(self.store.update(b["id"], {"status": "owned"})["status"], "owned")
+        self.assertEqual(self.store.update(b["id"], {"status": "quatsch"})["status"], "build")
+        self.assertEqual({d["status"] for d in self.store.list()}, {"owned", "build"})
+        data = export_json(self.db)
+        other = Database(":memory:")
+        import_cards(other, FakeScryfall(), data)
+        self.assertEqual({d["name"]: d["status"] for d in DeckStore(other).list()},
+                         {"Precon": "owned", "Neues Deck": "build"})
+
     def test_card_ops(self):
         deck = self.store.create("Test")
         d = self.store.set_card(deck["id"], normalize_card(LURRUS), 1, "main")

@@ -101,6 +101,11 @@
 <div class="layout hidden" id="decks-view">
   <aside class="sidebar">
     <button class="btn primary" id="deck-new" style="width:100%;margin-top:12px">＋ Neues Deck</button>
+    <div class="seg deck-filter" id="deck-filter" style="margin-top:10px;width:100%">
+      <button data-df="all" class="active">Alle</button>
+      <button data-df="owned">Besitz</button>
+      <button data-df="build">Bau</button>
+    </div>
     <div id="deck-list" class="deck-list"></div>
   </aside>
   <main class="content" id="deck-main">
@@ -127,6 +132,11 @@
   <form method="dialog" class="modal-body" id="deck-form">
     <header><h2 id="deck-form-title">Neues Deck</h2><button class="x" value="cancel" formnovalidate>×</button></header>
     <label id="deck-name-wrap">Name <input id="deck-name" placeholder="z.B. Atraxa Superfriends"></label>
+    <label id="deck-status-wrap">Status
+      <select id="deck-status">
+        <option value="build">Bau – Deck, das ich zusammenstellen will</option>
+        <option value="owned">Besitz – Deck ist gebaut/vorhanden</option>
+      </select></label>
     <label>Deckliste (optional) – eine Karte pro Zeile, z.B. „1 Sol Ring“; Abschnitte „Commander“, „Deck“, „Sideboard“
       <textarea id="deck-list-text" rows="12" placeholder="Commander&#10;1 Atraxa, Praetors' Voice&#10;&#10;Deck&#10;1 Sol Ring&#10;1 Arcane Signet&#10;..."></textarea></label>
     <label class="check" id="deck-replace-wrap"><input type="checkbox" id="deck-replace"> vorhandene Karten im Deck ersetzen</label>

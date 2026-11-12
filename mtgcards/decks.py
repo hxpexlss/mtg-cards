@@ -7,6 +7,11 @@ from .db import now_iso
 from .scryfall import ScryfallError, normalize_card
 
 BOARDS = ("commander", "main", "side", "maybe")
+STATUSES = ("owned", "build")   # Besitz = Deck ist gebaut/vorhanden, Bau = Deck wird zusammengestellt
+
+
+def _status(v):
+    return v if v in STATUSES else "build"
 
 DECK_SCHEMA = """
 CREATE TABLE IF NOT EXISTS decks (
@@ -87,6 +92,9 @@ class DeckStore:
         with db._lock:
             db.conn.execute("PRAGMA foreign_keys=ON")
             db.conn.executescript(DECK_SCHEMA)
+            cols = {r[1] for r in db.conn.execute("PRAGMA table_info(decks)")}
+            if "status" not in cols:
+                db.conn.execute("ALTER TABLE decks ADD COLUMN status TEXT NOT NULL DEFAULT 'build'")
             db.conn.commit()
 
     # -- Hilfen ---------------------------------------------------------------
@@ -128,25 +136,25 @@ class DeckStore:
         return d
 
     # -- Decks ---------------------------------------------------------------
-    def create(self, name, fmt="commander", notes=""):
+    def create(self, name, fmt="commander", notes="", status="build"):
         name = (name or "").strip()
         if not name:
             raise ValueError("Name fehlt")
         ts = now_iso()
         with self.db._lock:
             cur = self.db.conn.execute(
-                "INSERT INTO decks(name, format, notes, created_at, updated_at) VALUES(?,?,?,?,?)",
-                (name, fmt or "commander", notes or "", ts, ts))
+                "INSERT INTO decks(name, format, notes, status, created_at, updated_at) VALUES(?,?,?,?,?,?)",
+                (name, fmt or "commander", notes or "", _status(status), ts, ts))
             self.db._bump()
             self.db.conn.commit()
             return self.get(cur.lastrowid)
 
     def update(self, deck_id, changes):
         sets, vals = [], []
-        for k in ("name", "format", "notes"):
+        for k in ("name", "format", "notes", "status"):
             if k in changes:
                 sets.append(f"{k}=?")
-                vals.append(str(changes[k]))
+                vals.append(_status(changes[k]) if k == "status" else str(changes[k]))
         with self.db._lock:
             if not self.db.conn.execute("SELECT 1 FROM decks WHERE id=?", (deck_id,)).fetchone():
                 return None
@@ -174,7 +182,7 @@ class DeckStore:
 
     @staticmethod
     def _summary(deck):
-        keys = ("id", "name", "format", "notes", "created_at", "updated_at", "commanders", "color_identity",
+        keys = ("id", "name", "format", "notes", "status", "created_at", "updated_at", "commanders", "color_identity",
                 "stats")
         return {k: deck[k] for k in keys}
 
@@ -362,7 +370,7 @@ def export_decks(db):
             cards = [store._card_row(r) for r in db.conn.execute(
                 "SELECT * FROM deck_cards WHERE deck_id=? ORDER BY id", (d["id"],))]
             out.append({
-                "name": d["name"], "format": d["format"], "notes": d["notes"],
+                "name": d["name"], "format": d["format"], "notes": d["notes"], "status": d.get("status") or "build",
                 "created_at": d["created_at"], "updated_at": d["updated_at"],
                 "cards": [{k: c[k] for k in _DECK_CARD_FIELDS} for c in cards],
             })
@@ -384,8 +392,8 @@ def import_decks(db, decks, replace=False):
             if d["name"].lower() in existing:
                 continue  # beim Ergänzen nicht doppelt anlegen
             cur = db.conn.execute(
-                "INSERT INTO decks(name, format, notes, created_at, updated_at) VALUES(?,?,?,?,?)",
-                (d["name"], d.get("format") or "commander", d.get("notes") or "",
+                "INSERT INTO decks(name, format, notes, status, created_at, updated_at) VALUES(?,?,?,?,?,?)",
+                (d["name"], d.get("format") or "commander", d.get("notes") or "", _status(d.get("status")),
                  d.get("created_at") or now_iso(), d.get("updated_at") or now_iso()))
             for c in d.get("cards") or []:
                 if not c.get("name"):
