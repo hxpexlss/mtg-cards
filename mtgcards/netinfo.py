@@ -31,6 +31,19 @@ def local_addresses():
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
     if not out:
+        # Windows / kein "ip": alle IPv4-Adressen des Rechners über den Hostnamen
+        try:
+            seen = set()
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                addr = info[4][0]
+                if addr.startswith("127.") or addr in seen:
+                    continue
+                seen.add(addr)
+                ts = ipaddress.ip_address(addr) in _TAILSCALE_NET
+                out.append({"iface": "Tailscale" if ts else "LAN", "address": addr, "tailscale": ts})
+        except (OSError, ValueError):
+            pass
+    if not out:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("10.255.255.255", 1))

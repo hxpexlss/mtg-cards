@@ -9,7 +9,17 @@ from . import __version__, config, tls
 from .server import Server
 
 
+def _console_safe():
+    """Windows-Konsole: Umlaute/Sonderzeichen nicht mit UnicodeEncodeError abbrechen lassen."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _console_safe()
     p = argparse.ArgumentParser(prog="mtg-cards-server", description="MTG Cards Headless-Server")
     p.add_argument("--config", default=os.environ.get("MTGCARDS_CONFIG", config.SERVER_CONFIG_PATH))
     p.add_argument("--bind", help="Adresse (Standard 0.0.0.0)")
@@ -27,8 +37,13 @@ def main(argv=None):
     p.add_argument("--export", metavar="DATEI", help="Sammlung exportieren (.json oder .csv; '-' = stdout)")
     p.add_argument("--import", dest="import_file", metavar="DATEI", help="Sammlung importieren (JSON/CSV)")
     p.add_argument("--replace", action="store_true", help="Beim Import Sammlung ersetzen statt ergänzen")
+    p.add_argument("--log", metavar="DATEI", help="Ausgaben in eine Datei schreiben (z.B. als Windows-Dienst)")
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
+    if args.log:
+        os.makedirs(os.path.dirname(os.path.abspath(args.log)), exist_ok=True)
+        log = open(args.log, "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = log
 
     try:
         cfg = config.load(args.config, config.SERVER_DEFAULTS)
@@ -39,7 +54,7 @@ def main(argv=None):
         cfg["token"] = config.generate_token()
         config.save(args.config, cfg)
         print(cfg["token"])
-        print("Hinweis: Dienst neu starten: sudo systemctl restart mtg-cards-server", file=sys.stderr)
+        print("Hinweis: " + _restart_hint(), file=sys.stderr)
         return 0
     if args.show_token:
         print(cfg["token"])
@@ -87,7 +102,7 @@ def configure_tls(args, cfg):
     if args.disable_tls:
         cfg["tls"] = False
         config.save(args.config, cfg)
-        print("HTTPS deaktiviert. Neustart: sudo systemctl restart mtg-cards-server")
+        print("HTTPS deaktiviert. " + _restart_hint())
         return 0
     if args.cert or args.key:
         if not (args.cert and args.key):
@@ -109,9 +124,15 @@ def configure_tls(args, cfg):
     config.save(args.config, cfg)
     print("HTTPS aktiviert.")
     print(f"Fingerabdruck: {tls.fingerprint_file(cfg['tls_cert'])}")
-    print("Neustart: sudo systemctl restart mtg-cards-server")
+    print(_restart_hint())
     print("In App und Desktop die Adresse mit https:// eintragen und den Fingerabdruck vergleichen.")
     return 0
+
+
+def _restart_hint():
+    if os.name == "nt":
+        return "Neustart: Windows neu starten oder in der Aufgabenplanung „MTG Cards Server“ beenden und neu ausführen."
+    return "Neustart: sudo systemctl restart mtg-cards-server"
 
 
 def _share_with_service(cert, key):
@@ -123,8 +144,8 @@ def _share_with_service(cert, key):
             os.chown(path, 0, gid)
         os.chmod(os.path.dirname(key), 0o750)
         os.chmod(key, 0o640)
-    except (KeyError, PermissionError, OSError):
-        pass
+    except (ImportError, AttributeError, KeyError, PermissionError, OSError):
+        pass   # z.B. Windows: kein grp/chown
 
 
 def offline_io(args, db_path):

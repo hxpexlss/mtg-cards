@@ -53,12 +53,52 @@ def ensure_self_signed(cert_path, key_path, extra_names=()):
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
-        raise TlsError("openssl ist nicht installiert (sudo apt install openssl)") from None
+        # Kein openssl (z.B. Windows): mit dem Python-Paket "cryptography" erzeugen, falls vorhanden
+        os.umask(old_umask)
+        return _self_signed_with_cryptography(cert_path, key_path, host, extra_names)
     finally:
         os.umask(old_umask)
     if res.returncode != 0:
         raise TlsError(f"Zertifikat konnte nicht erzeugt werden: {res.stderr.strip()}")
     os.chmod(cert_path, 0o644)
+    return True
+
+
+def _self_signed_with_cryptography(cert_path, key_path, host, extra_names):
+    try:
+        import datetime
+        import ipaddress
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+    except ImportError:
+        raise TlsError("Zum Erzeugen eines Zertifikats wird openssl oder das Python-Paket "
+                       "'cryptography' benötigt (Linux: sudo apt install openssl)") from None
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host),
+                      x509.NameAttribute(NameOID.ORGANIZATION_NAME, "MTG Cards")])
+    alt = [x509.DNSName(host), x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+    for n in extra_names:
+        if not n:
+            continue
+        try:
+            alt.append(x509.IPAddress(ipaddress.ip_address(n)))
+        except ValueError:
+            alt.append(x509.DNSName(n))
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(days=1))
+            .not_valid_after(now + datetime.timedelta(days=3650))
+            .add_extension(x509.SubjectAlternativeName(alt), critical=False)
+            .sign(key, hashes.SHA256()))
+    with open(key_path, "wb") as f:
+        f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                  serialization.NoEncryption()))
+    with open(cert_path, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
     return True
 
 

@@ -34,6 +34,10 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 
 ## Installation
 
+> **Windows:** Desktop und Server gibt es auch für Windows (Vorschau, Branch `claude/windows-build`) als
+> Installationsprogramm `MTG-Cards-Setup-<version>.exe` im Release `v<version>-windows`.
+> Details: [packaging/windows/RELEASE_NOTES.md](packaging/windows/RELEASE_NOTES.md).
+
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
