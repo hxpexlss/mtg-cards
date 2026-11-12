@@ -1,4 +1,4 @@
-; Inno-Setup-Skript für MTG Cards (Windows)
+﻿; Inno-Setup-Skript für MTG Cards (Windows)
 ; Bauen: iscc /DAppVersion=1.9.0 packaging\windows\mtg-cards.iss
 ; Erwartet die PyInstaller-Ausgabe in dist\windows\mtg-cards-desktop und dist\windows\mtg-cards-server
 
@@ -67,6 +67,21 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Remove-NetFirewal
 ; Nach der Installation
 Filename: "{cmd}"; Parameters: "/k ""title MTG Cards Server-Token & ""{app}\server\mtg-cards-server.exe"" --show-token"""; Description: "Server-Token anzeigen (für App und andere PCs)"; Flags: postinstall skipifsilent unchecked; Components: server
 Filename: "{app}\desktop\mtg-cards-desktop.exe"; Description: "MTG Cards starten"; Flags: postinstall nowait skipifsilent; Components: desktop
+
+[Code]
+// Vor dem Kopieren der Dateien: laufenden Server (geplante Aufgabe, läuft als SYSTEM) und die Desktop-Anwendung
+// beenden. Sonst sind die .exe/.dll bei einem Update gesperrt und der Installer verlangt einen Neustart.
+// Der Server wird danach von install-server.ps1 wieder gestartet.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "MTG Cards Server"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM mtg-cards-server.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM mtg-cards-desktop.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+  Result := '';
+end;
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall-server.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveServer"

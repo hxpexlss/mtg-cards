@@ -75,10 +75,15 @@ def main(argv=None):
     port = args.port or int(cfg["port"])
     db_path = args.db or cfg["db_path"]
     use_tls = bool(cfg.get("tls"))
-    srv = Server(db_path, cfg["token"], bind=bind, port=port, kind="server",
-                 discovery=cfg.get("discovery", True) and not args.no_discovery,
-                 tls_cert=cfg["tls_cert"] if use_tls else None, tls_key=cfg["tls_key"] if use_tls else None,
-                 auto_refresh_hours=float(cfg.get("auto_refresh_hours", 24)))
+    try:
+        srv = Server(db_path, cfg["token"], bind=bind, port=port, kind="server",
+                     discovery=cfg.get("discovery", True) and not args.no_discovery,
+                     tls_cert=cfg["tls_cert"] if use_tls else None, tls_key=cfg["tls_key"] if use_tls else None,
+                     auto_refresh_hours=float(cfg.get("auto_refresh_hours", 24)))
+    except OSError as e:
+        print(f"Server konnte nicht starten – Port {port} ist belegt oder nicht erlaubt ({e}). "
+              f"Läuft MTG Cards bereits? Anderen Port mit --port wählen.", file=sys.stderr, flush=True)
+        return 1
 
     def _stop(*_):
         raise KeyboardInterrupt

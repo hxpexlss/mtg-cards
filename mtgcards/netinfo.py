@@ -2,6 +2,7 @@
 
 import ipaddress
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -11,11 +12,17 @@ from . import APP_NAME, DISCOVERY_MAGIC, DISCOVERY_PORT, __version__
 
 _TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")
 
+# Windows: Hilfsprogramme (tailscale, openssl) ohne eigenes Konsolenfenster starten – sonst blitzt bei der
+# Desktop-Anwendung (die selbst keine Konsole hat) bei jedem Aufruf kurz ein schwarzes Fenster auf.
+NO_WINDOW = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
+
 
 def local_addresses():
     """Liste von {"iface", "address", "tailscale"} für alle IPv4-Adressen außer Loopback."""
     out = []
     try:
+        if os.name == "nt":
+            raise OSError("kein 'ip' unter Windows")       # gleich zur Namensauflösung unten
         res = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True,
                              text=True, timeout=2, check=False)
         for line in res.stdout.splitlines():
@@ -60,7 +67,7 @@ def tailscale_dns_name():
         return None
     try:
         res = subprocess.run([exe, "status", "--self", "--json"], capture_output=True,
-                             text=True, timeout=3, check=False)
+                             text=True, timeout=3, check=False, **NO_WINDOW)
         name = json.loads(res.stdout).get("Self", {}).get("DNSName", "")
         return name.rstrip(".") or None
     except (OSError, subprocess.SubprocessError, ValueError):

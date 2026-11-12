@@ -51,7 +51,8 @@ def ensure_self_signed(cert_path, key_path, extra_names=()):
            "-keyout", key_path, "-out", cert_path]
     old_umask = os.umask(0o077)
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        no_window = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False, **no_window)
     except FileNotFoundError:
         # Kein openssl (z.B. Windows): mit dem Python-Paket "cryptography" erzeugen, falls vorhanden
         os.umask(old_umask)

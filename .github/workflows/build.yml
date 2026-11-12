@@ -102,8 +102,30 @@ jobs:
           Write-Output "Server OK: Version $($health.version), $($stats.cards) Karten"
           $web = Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing
           if ($web.Content -notmatch "MTG Cards") { throw "Weboberfläche fehlt" }
+          if ($health.version -ne "${{ steps.ver.outputs.version }}") { throw "Falsche Version: $($health.version)" }
+          # Ungültige Eingaben müssen eine verständliche 400-Antwort liefern (kein interner Fehler)
+          $bad = $null
+          try { Invoke-RestMethod "http://127.0.0.1:8799/api/cards?limit=abc" -Headers @{ Authorization = "Bearer $token" } } catch { $bad = $_.Exception.Response.StatusCode.value__ }
+          if ($bad -ne 400) { throw "Ungültige Eingabe sollte 400 liefern, war: $bad" }
+          # Derselbe Port darf unter Windows nicht ein zweites Mal belegt werden können
+          $second = Start-Process -FilePath $srv -ArgumentList "--config `"$cfg`" --port 8799 --db `"$tmp\s2.db`" --no-discovery --log `"$tmp\server2.log`"" -PassThru
+          if (-not $second.WaitForExit(15000)) { Stop-Process -Id $second.Id -Force; throw "Zweiter Server auf demselben Port ist nicht abgebrochen" }
+          if ($second.ExitCode -eq 0) { throw "Zweiter Server auf demselben Port meldete keinen Fehler" }
+          Write-Output "Port-Schutz OK:"; Get-Content "$tmp\server2.log"
+          $again = Invoke-RestMethod http://127.0.0.1:8799/api/health
+          if ($again.app -ne "mtg-cards") { throw "Erster Server antwortet nach dem Port-Test nicht mehr" }
           Stop-Process -Id $p.Id -Force
           Get-Content "$tmp\server.log"
+          # HTTPS: Zertifikat ohne openssl erzeugen (Paket cryptography in der .exe) und verschlüsselt starten
+          & $srv --config $cfg --enable-tls
+          if ($LASTEXITCODE -ne 0) { throw "--enable-tls fehlgeschlagen" }
+          $t = Start-Process -FilePath $srv -ArgumentList "--config `"$cfg`" --port 8797 --db `"$tmp\s.db`" --no-discovery --log `"$tmp\server-tls.log`"" -PassThru
+          Start-Sleep -Seconds 6
+          $th = Invoke-RestMethod https://127.0.0.1:8797/api/health -SkipCertificateCheck
+          if (-not $th.tls) { throw "HTTPS ist nicht aktiv" }
+          Write-Output "HTTPS OK"
+          Stop-Process -Id $t.Id -Force
+          & $srv --config $cfg --disable-tls
           # Desktop-Programm im Server-Modus (ohne Fenster) starten und prüfen
           $dcfg = Join-Path $tmp "desktop.json"
           $d = Start-Process -FilePath "dist\windows\mtg-cards-desktop\mtg-cards-desktop.exe" -ArgumentList "--config `"$dcfg`" --port 8798 --server-only" -PassThru

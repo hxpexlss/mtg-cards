@@ -28,6 +28,7 @@ from .scryfall import Scryfall, ScryfallError, normalize_card
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_BODY = 64 * 1024 * 1024
+PROXY_HEADER = "X-MTGCards-Proxied"      # markiert weitergeleitete Anfragen (Schutz vor Weiterleitungs-Schleifen)
 
 
 class ApiError(Exception):
@@ -247,9 +248,15 @@ class Handler(BaseHTTPRequestHandler):
     # -- Remote-Proxy (Desktop im Remote-Modus) ----------------------------------
     def proxy(self, remote, method, url):
         base, token, fingerprint = remote
+        if self.headers.get(PROXY_HEADER):
+            # Die eingetragene Server-Adresse zeigt (direkt oder über Umwege) wieder auf eine Anwendung im
+            # Server-Modus – ohne diese Prüfung würde die Anfrage endlos im Kreis weitergereicht.
+            raise ApiError(508, "Die eingestellte Server-Adresse zeigt auf eine MTG-Cards-Anwendung, die selbst nur "
+                                "weiterleitet (evtl. auf diesen PC selbst). Bitte unter Einstellungen die Adresse "
+                                "des Servers eintragen oder „Lokal auf diesem PC“ wählen.")
         body = self.read_body() if method in ("POST", "PATCH") else None
         target = base + url.path + (("?" + url.query) if url.query else "")
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", PROXY_HEADER: "1"}
         if self.headers.get("Content-Type"):
             headers["Content-Type"] = self.headers["Content-Type"]
         req = Request(target, data=body, method=method, headers=headers)
@@ -1047,7 +1054,15 @@ def cache_path_for(db_path):
 class QuietHTTPServer(ThreadingHTTPServer):
     """Keine Tracebacks bei abgebrochenen Verbindungen / fehlgeschlagenen TLS-Handshakes."""
     daemon_threads = True
-    allow_reuse_address = True
+    # Unter Windows erlaubt SO_REUSEADDR, dass ein ZWEITES Programm denselben Port belegt (beide lauschen dann
+    # gleichzeitig, Anfragen landen mal hier, mal dort). Dort deshalb exklusiv binden – "Port belegt" wird so
+    # zuverlässig erkannt (z.B. Desktop und Server auf demselben PC).
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def handle_error(self, request, client_address):
         import ssl
@@ -1074,7 +1089,11 @@ class Server:
         self.ctx = AppContext(self.db, scryfall, token, kind=kind,
                               port=port, desktop=desktop)
         handler = type("BoundHandler", (Handler,), {"ctx": self.ctx})
-        self.httpd = QuietHTTPServer((bind, port), handler)
+        try:
+            self.httpd = QuietHTTPServer((bind, port), handler)
+        except OSError:
+            self.db.close()      # Port belegt: Datenbank nicht geöffnet zurücklassen
+            raise
         self.servers = [self.httpd]
         self.local_port = None
         if tls_cert and tls_key:
