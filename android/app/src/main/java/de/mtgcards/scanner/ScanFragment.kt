@@ -71,6 +71,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
     private lateinit var recentList: RecyclerView
     private lateinit var recentAdapter: RecentAdapter
     private lateinit var batchSwitch: MaterialSwitch
+    private lateinit var proxySwitch: MaterialSwitch
     private lateinit var batchButton: Button
 
     private var camera: Camera? = null
@@ -112,6 +113,12 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         sessionView = view.findViewById(R.id.sessionCount)
         recentList = view.findViewById(R.id.recent)
         batchSwitch = view.findViewById(R.id.batchMode)
+        proxySwitch = view.findViewById(R.id.proxyMode)
+        proxySwitch.isChecked = Prefs.proxyMode(requireContext())
+        proxySwitch.setOnCheckedChangeListener { _, on ->
+            Prefs.setProxyMode(requireContext(), on)
+            status.text = if (on) "🅿 Proxy-Modus: gescannte Karten bekommen den Tag „Proxies“" else "Proxy-Modus aus"
+        }
         batchButton = view.findViewById(R.id.btnBatch)
         batchSwitch.isChecked = BatchStore.isEnabled(requireContext())
         batchSwitch.setOnCheckedChangeListener { _, on ->
@@ -172,7 +179,16 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         ) startCamera() else permission.launch(Manifest.permission.CAMERA)
 
         syncPending(manual = false)
+        // Offline gemerkte Scans regelmäßig nachtragen, solange die Scan-Ansicht offen ist
+        viewLifecycleOwner.lifecycleScope.launch {
+            while (true) {
+                delay(30_000L)
+                syncPending(manual = false)
+            }
+        }
     }
+
+    private val proxy get() = proxySwitch.isChecked
 
     override fun onResume() {
         super.onResume()
@@ -329,7 +345,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 val card = Api.fromPrefs(requireContext()).lookup(name, scan.setCode, scan.collectorNumber, scan.alternatives, langFor(scan))
                 when {
                     batchSwitch.isChecked -> {
-                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked))
+                        addToBatch(BatchItem.fromCard(card, foilCheck.isChecked, proxy))
                         blockedName = CardTextParser.normalize(name)
                         overlay.active = false
                         delay(400L)
@@ -344,11 +360,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                 if (e.code == Api.UNREACHABLE && batchSwitch.isChecked) {
                     // offline im Stapel: Name merken, beim Speichern wird nachgeschlagen
                     addToBatch(BatchItem(null, name, scan.setCode, scan.collectorNumber, 1, foilCheck.isChecked,
-                        null, null, null, langFor(scan)))
+                        null, null, null, langFor(scan), proxy))
                     status.text = "Offline – „$name“ im Stapel (wird beim Speichern geprüft)"
                     delay(900L)
                 } else if (e.code == Api.UNREACHABLE) {
-                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan)))
+                    queueOffline(PendingScan(name, scan.setCode, scan.collectorNumber, foilCheck.isChecked, 1, langFor(scan), proxy))
                     delay(900L)
                 } else {
                     feedback.error(overlay, sound)
@@ -399,11 +415,11 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         addButton.isEnabled = false
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val res = Api.fromPrefs(requireContext()).addCard(card.getString("scryfall_id"), qty, foil)
+                val res = Api.fromPrefs(requireContext()).addCard(card.getString("scryfall_id"), qty, foil, proxyTags(proxy))
                 ScanSession.added += qty
                 ScanSession.push(RecentScan(res.optLong("id"), res.optString("name"), res.optString("image_url"), res.optInt("quantity")))
                 feedback.success(overlay, sound)
-                status.text = "✓ ${res.optString("name")} – jetzt ${res.optInt("quantity")}×"
+                status.text = "✓ ${if (res.optBoolean("proxy")) "🅿 " else ""}${res.optString("name")} – jetzt ${res.optInt("quantity")}×"
                 val wishes = res.optJSONArray("wish_fulfilled")
                 if (wishes != null && wishes.length() > 0) {
                     Toast.makeText(requireContext(), "★ Wunsch erfüllt: ${wishes.getJSONObject(0).optString("name")}",
@@ -415,7 +431,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
             } catch (e: ApiException) {
                 if (e.code == Api.UNREACHABLE) {
                     queueOffline(PendingScan(card.optString("name"), card.optString("set_code"),
-                        card.optString("collector_number"), foil, qty))
+                        card.optString("collector_number"), foil, qty, card.optString("lang").ifBlank { null }, proxy))
                     dismissResult()
                 } else {
                     feedback.error(overlay, sound)
@@ -453,7 +469,7 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
                     continue
                 }
                 try {
-                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang)
+                    val res = api.addByName(p.name, p.setCode, p.cn, p.quantity, p.foil, p.lang, proxyTags(p.proxy))
                     sent += p.quantity
                     ScanSession.added += p.quantity
                     ScanSession.recent.removeAll { it.pending && it.name == p.name }

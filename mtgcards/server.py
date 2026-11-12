@@ -374,7 +374,8 @@ def _add_one(h, data):
                                 tags=data.get("tags") or [], notes=data.get("notes") or "")
     row["created"] = created
     row["owned"] = h.ctx.db.find_owned(row["scryfall_id"], row["oracle_id"])
-    row["wish_fulfilled"] = h.ctx.wishlist.fulfill(card, qty)
+    # Proxies erfüllen keine Wünsche
+    row["wish_fulfilled"] = [] if row.get("proxy") else h.ctx.wishlist.fulfill(card, qty)
     return row, created
 
 

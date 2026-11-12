@@ -51,7 +51,7 @@ class Wishlist:
     # -- Lesen ---------------------------------------------------------------
     def _owned(self):
         out = {}
-        for oid, name, qty in self.db.conn.execute("SELECT oracle_id, name, quantity FROM cards"):
+        for oid, name, qty in self.db.conn.execute("SELECT oracle_id, name, quantity FROM cards WHERE proxy=0"):
             out[oid or name.lower()] = out.get(oid or name.lower(), 0) + qty
         return out
 

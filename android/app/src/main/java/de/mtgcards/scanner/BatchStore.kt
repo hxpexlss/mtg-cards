@@ -16,9 +16,10 @@ data class BatchItem(
     val priceEurFoil: Double?,
     val imageUrl: String?,
     val lang: String? = null,
+    val proxy: Boolean = false,
 ) {
-    val unitPrice get() = if (foil) priceEurFoil ?: priceEur else priceEur ?: priceEurFoil
-    val key get() = "${scryfallId ?: name.lowercase()}|$foil"
+    val unitPrice get() = if (proxy) null else if (foil) priceEurFoil ?: priceEur else priceEur ?: priceEurFoil
+    val key get() = "${scryfallId ?: name.lowercase()}|$foil|$proxy"
 
     fun toJson() = JSONObject().apply {
         put("scryfall_id", scryfallId ?: "")
@@ -31,6 +32,7 @@ data class BatchItem(
         put("price_eur_foil", priceEurFoil ?: JSONObject.NULL)
         put("image_url", imageUrl ?: "")
         put("lang", lang ?: "")
+        put("proxy", proxy)
     }
 
     /** Für POST /api/cards/batch */
@@ -43,6 +45,7 @@ data class BatchItem(
         }
         put("quantity", quantity)
         put("foil", foil)
+        if (proxy) put("tags", JSONArray(listOf(PROXY_TAG)))
     }
 
     companion object {
@@ -55,13 +58,14 @@ data class BatchItem(
             o.optInt("quantity", 1), o.optBoolean("foil"), price(o, "price_eur"), price(o, "price_eur_foil"),
             o.optString("image_url").ifBlank { null },
             o.optString("lang").ifBlank { null },
+            o.optBoolean("proxy"),
         )
 
         /** Aus einer Scryfall-Karte vom Server (/api/lookup). */
-        fun fromCard(card: JSONObject, foil: Boolean) = BatchItem(
+        fun fromCard(card: JSONObject, foil: Boolean, proxy: Boolean = false) = BatchItem(
             card.optString("scryfall_id"), card.optString("name"), card.optString("set_code"),
             card.optString("collector_number"), 1, foil, price(card, "price_eur"), price(card, "price_eur_foil"),
-            card.optString("image_url").ifBlank { null },
+            card.optString("image_url").ifBlank { null }, proxy = proxy,
         )
     }
 }

@@ -3,6 +3,7 @@ package de.mtgcards.scanner
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
@@ -42,41 +43,69 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
     }
 
-    private suspend fun request(method: String, path: String, body: JSONObject? = null): String =
-        withContext(Dispatchers.IO) {
-            if (baseUrl.isBlank()) {
-                throw ApiException("Kein Server eingestellt – bitte unter Einstellungen eintragen", NOT_CONFIGURED)
-            }
-            var conn: HttpURLConnection? = null
+    /**
+     * HTTP-Anfrage mit automatischer Wiederholung bei Netzwerkfehlern (z.B. Tailscale wacht gerade auf,
+     * WLAN/Mobilfunk-Wechsel). POST wird nur wiederholt, wenn die Anfrage den Server noch nicht erreicht hat,
+     * damit keine Karten doppelt gespeichert werden.
+     */
+    private suspend fun request(method: String, path: String, body: JSONObject? = null): String {
+        if (baseUrl.isBlank()) {
+            throw ApiException("Kein Server eingestellt – bitte unter Einstellungen eintragen", NOT_CONFIGURED)
+        }
+        var lastError: IOException? = null
+        var attempts = 0
+        for (attempt in 0 until 3) {
+            if (attempt > 0) delay(if (attempt == 1) 800L else 2500L)
+            attempts++
+            val sent = booleanArrayOf(false)
             try {
-                conn = URL(baseUrl + path).openConnection() as HttpURLConnection
-                if (conn is HttpsURLConnection) Tls.configure(conn, fingerprint)
-                conn.requestMethod = method
-                conn.connectTimeout = 6000
-                conn.readTimeout = 30000
-                conn.setRequestProperty("Authorization", "Bearer $token")
-                conn.setRequestProperty("Accept", "application/json")
-                if (body != null) {
-                    conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-                if (code !in 200..299) {
-                    val msg = try { JSONObject(text).optString("error") } catch (e: Exception) { "" }
-                    throw ApiException(msg.ifBlank { "HTTP-Fehler $code" }, code)
-                }
-                text
+                val text = withContext(Dispatchers.IO) { doRequest(method, path, body, sent) }
+                ConnectionLog.ok(attempt)
+                return text
             } catch (e: SSLException) {
+                ConnectionLog.error(path, "Zertifikat abgelehnt", attempts)
                 throw ApiException("Zertifikat des Servers ist nicht vertrauenswürdig oder hat sich geändert", TLS_UNTRUSTED)
             } catch (e: IOException) {
-                throw ApiException("Server nicht erreichbar (${e.message ?: e.javaClass.simpleName})")
-            } finally {
-                conn?.disconnect()
+                lastError = e
+                if (sent[0] && method == "POST") break   // Server hat die Anfrage evtl. schon verarbeitet
             }
         }
+        val msg = lastError?.let { it.message ?: it.javaClass.simpleName } ?: "unbekannt"
+        ConnectionLog.error(path, "${lastError?.javaClass?.simpleName}: $msg", attempts)
+        throw ApiException("Server nicht erreichbar ($msg)")
+    }
+
+    private fun doRequest(method: String, path: String, body: JSONObject?, sent: BooleanArray): String {
+        val conn = URL(baseUrl + path).openConnection() as HttpURLConnection
+        try {
+            if (conn is HttpsURLConnection) Tls.configure(conn, fingerprint)
+            conn.requestMethod = method
+            conn.connectTimeout = 10000      // Tailscale braucht nach Funkstille manchmal ein paar Sekunden
+            conn.readTimeout = 45000         // Scryfall-Abfragen des Servers können dauern
+            conn.useCaches = false
+            conn.setRequestProperty("Connection", "close")   // keine abgerissenen Verbindungen wiederverwenden
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Accept", "application/json")
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            } else {
+                conn.connect()
+            }
+            sent[0] = true
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+            if (code !in 200..299) {
+                val msg = try { JSONObject(text).optString("error") } catch (e: Exception) { "" }
+                throw ApiException(msg.ifBlank { "HTTP-Fehler $code" }, code)
+            }
+            return text
+        } finally {
+            conn.disconnect()
+        }
+    }
 
     private suspend fun json(method: String, path: String, body: JSONObject? = null) =
         JSONObject(request(method, path, body))
@@ -105,18 +134,20 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         return json("GET", "/api/lookup?$q")
     }
 
-    suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean): JSONObject =
+    suspend fun addCard(scryfallId: String, quantity: Int, foil: Boolean, tags: List<String> = emptyList()): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("scryfall_id", scryfallId)
             put("quantity", quantity)
             put("foil", foil)
+            if (tags.isNotEmpty()) put("tags", org.json.JSONArray(tags))
         })
 
     /** Hinzufügen per Name (+ optional Set/Nummer) – der Server schlägt bei Scryfall nach. */
     suspend fun addByName(name: String, setCode: String?, cn: String?, quantity: Int, foil: Boolean,
-                          lang: String? = null): JSONObject =
+                          lang: String? = null, tags: List<String> = emptyList()): JSONObject =
         json("POST", "/api/cards", JSONObject().apply {
             put("name", name)
+            if (tags.isNotEmpty()) put("tags", org.json.JSONArray(tags))
             if (!lang.isNullOrBlank()) put("lang", lang)
             if (!setCode.isNullOrBlank()) put("set", setCode)
             if (!cn.isNullOrBlank()) put("cn", cn)

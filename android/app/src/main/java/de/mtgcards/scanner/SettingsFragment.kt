@@ -33,6 +33,12 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             isChecked = Prefs.sound(requireContext())
             setOnCheckedChangeListener { _, c -> Prefs.setSound(requireContext(), c) }
         }
+        val log = view.findViewById<TextView>(R.id.connLog)
+        log.text = ConnectionLog.summary()
+        view.findViewById<Button>(R.id.connLogClear).setOnClickListener {
+            ConnectionLog.clear()
+            log.text = ConnectionLog.summary()
+        }
         view.findViewById<Button>(R.id.btnSave).setOnClickListener { saveAndTest() }
         view.findViewById<Button>(R.id.btnDiscover).setOnClickListener { discover() }
     }

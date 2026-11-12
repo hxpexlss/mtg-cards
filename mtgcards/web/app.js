@@ -3,7 +3,7 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const AUTO_TAGS = ["Commander", "Partner", "Companion"];
+const AUTO_TAGS = ["Commander", "Partner", "Companion", "Proxies"];   // immer in der Seitenleiste
 
 const state = {
   token: "",
@@ -129,6 +129,7 @@ function renderCards(data) {
         ${c.image_url ? `<img loading="lazy" src="${esc(c.image_url)}" alt="${esc(c.name)}">` : `<div class="noimg">${esc(c.name)}</div>`}
         <span class="badge">${c.quantity}×</span>
         ${c.foil ? `<span class="badge foil">Foil</span>` : ""}
+        ${c.proxy ? `<span class="badge proxy">PROXY</span>` : ""}
         <div class="meta">
           <div class="name" title="${esc(c.name)}">${esc(c.name)}</div>
           <div class="sub">${esc(c.set_code)} #${esc(c.collector_number)} · ${esc(c.type_line)}</div>
@@ -141,7 +142,7 @@ function renderCards(data) {
         <th>#</th><th>Name</th><th>Kosten</th><th>Typ</th><th>Farbid.</th><th>Edition</th><th>Tags</th><th>€</th>
       </tr></thead><tbody>${data.cards.map((c) => `
       <tr data-id="${c.id}">
-        <td><b>${c.quantity}</b>${c.foil ? " ✦" : ""}</td>
+        <td><b>${c.quantity}</b>${c.foil ? " ✦" : ""}${c.proxy ? ` <span class="pill proxy">Proxy</span>` : ""}</td>
         <td>${esc(c.name)}${c.printed_name && c.printed_name !== c.name ? `<div class="muted small">${esc(c.printed_name)}</div>` : ""}</td>
         <td>${manaHtml(c.mana_cost)}</td>
         <td>${esc(c.type_line)}</td>
@@ -348,12 +349,13 @@ async function submitAdd(ev) {
   btn.disabled = true;
   try {
     const tags = $("#add-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
+    if ($("#add-proxy").checked && !tags.includes("Proxies")) tags.push("Proxies");
     const c = await api("/api/cards", {
       method: "POST",
       json: { name, scryfall_id: id || (add.preview && $("#add-lang").value ? add.preview.scryfall_id : undefined),
         lang: $("#add-lang").value || undefined, quantity: +$("#add-qty").value || 1, foil: $("#add-foil").checked, tags },
     });
-    toast(`${c.name} hinzugefügt (jetzt ${c.quantity}×)`, "ok");
+    toast(`${c.name}${c.proxy ? " (Proxy)" : ""} hinzugefügt (jetzt ${c.quantity}×)`, "ok");
     for (const w of c.wish_fulfilled || []) toast(`★ Wunsch erfüllt: ${w.name}${w.remaining ? ` (noch ${w.remaining} gewünscht)` : ""}`, "ok");
     loadCards();
     if ($("#add-keep").checked) {

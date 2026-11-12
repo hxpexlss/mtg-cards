@@ -50,11 +50,9 @@ CREATE TABLE IF NOT EXISTS cards (
     tags TEXT NOT NULL DEFAULT '[]',
     notes TEXT NOT NULL DEFAULT '',
     added_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    proxy INTEGER NOT NULL DEFAULT 0
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cards_print_foil ON cards(scryfall_id, foil)
-    WHERE scryfall_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS ix_cards_name ON cards(name COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS value_history (
     day TEXT PRIMARY KEY,
@@ -63,6 +61,21 @@ CREATE TABLE IF NOT EXISTS value_history (
     cards INTEGER NOT NULL
 );
 """
+
+INDEXES = """
+DROP INDEX IF EXISTS ux_cards_print_foil;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cards_print_foil_proxy ON cards(scryfall_id, foil, proxy)
+    WHERE scryfall_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_cards_name ON cards(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS ix_cards_oracle ON cards(oracle_id);
+"""
+
+PROXY_TAG = "Proxies"
+
+
+def is_proxy_tags(tags):
+    return any(str(t).lower() == PROXY_TAG.lower() for t in tags or [])
+
 
 SORTS = {
     "name": "name COLLATE NOCASE ASC",
@@ -112,7 +125,16 @@ class Database:
         with self._lock:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.executescript(SCHEMA)
+            self._migrate()
+            self.conn.executescript(INDEXES)
             self.conn.commit()
+
+    def _migrate(self):
+        """Ältere Datenbanken: Spalte 'proxy' ergänzen (Proxies sind eigene Einträge)."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(cards)")}
+        if "proxy" not in cols:
+            self.conn.execute("ALTER TABLE cards ADD COLUMN proxy INTEGER NOT NULL DEFAULT 0")
+            self.conn.execute("UPDATE cards SET proxy=1 WHERE tags LIKE ?", (f'%"{PROXY_TAG}"%',))
 
     # -- Hilfsfunktionen --------------------------------------------------
     def _row(self, row):
@@ -120,6 +142,7 @@ class Database:
             return None
         d = dict(row)
         d["foil"] = bool(d["foil"])
+        d["proxy"] = bool(d.get("proxy"))
         d["tags"] = _as_list(d.get("tags"))
         d["keywords"] = _as_list(d.get("keywords"))
         return d
@@ -151,11 +174,11 @@ class Database:
             total = 0
             if scryfall_id:
                 exact = self.conn.execute(
-                    "SELECT COALESCE(SUM(quantity),0) FROM cards WHERE scryfall_id=?", (scryfall_id,)
+                    "SELECT COALESCE(SUM(quantity),0) FROM cards WHERE scryfall_id=? AND proxy=0", (scryfall_id,)
                 ).fetchone()[0]
             if oracle_id:
                 total = self.conn.execute(
-                    "SELECT COALESCE(SUM(quantity),0) FROM cards WHERE oracle_id=?", (oracle_id,)
+                    "SELECT COALESCE(SUM(quantity),0) FROM cards WHERE oracle_id=? AND proxy=0", (oracle_id,)
                 ).fetchone()[0]
             return {"this_print": exact, "all_prints": max(total, exact)}
 
@@ -169,6 +192,7 @@ class Database:
             "foil": 1 if foil else 0,
             "quantity": int(quantity),
             "tags": json.dumps(tags),
+            "proxy": 1 if is_proxy_tags(tags) else 0,
             "notes": notes or "",
             "added_at": added_at or ts,
             "updated_at": updated_at or ts,
@@ -179,18 +203,19 @@ class Database:
         return cur.lastrowid
 
     def add(self, card, foil=False, quantity=1, tags=None, notes="", _commit=True, **ts):
-        """Fügt eine Karte hinzu; existiert der Druck (gleiche Foil-Art) schon, wird die Anzahl erhöht.
+        """Fügt eine Karte hinzu; existiert der Druck (gleiche Foil-Art, Proxy/echt) schon, wird die Anzahl erhöht.
 
         Gibt (karte, neu_angelegt) zurück.
         """
         quantity = max(1, int(quantity or 1))
         tags = merge_tags(card.get("auto_tags") or auto_tags(card), tags)
+        proxy = 1 if is_proxy_tags(tags) else 0
         with self._lock:
             existing = None
             if card.get("scryfall_id"):
                 existing = self.conn.execute(
-                    "SELECT * FROM cards WHERE scryfall_id=? AND foil=?",
-                    (card["scryfall_id"], 1 if foil else 0),
+                    "SELECT * FROM cards WHERE scryfall_id=? AND foil=? AND proxy=?",
+                    (card["scryfall_id"], 1 if foil else 0, proxy),
                 ).fetchone()
             if existing:
                 ex = self._row(existing)
@@ -216,7 +241,10 @@ class Database:
             if k not in allowed:
                 continue
             if k == "tags":
-                v = json.dumps(merge_tags(_as_list(v)))
+                tag_list = merge_tags(_as_list(v))
+                v = json.dumps(tag_list)
+                sets.append("proxy=?")
+                vals.append(1 if is_proxy_tags(tag_list) else 0)
             elif k == "foil":
                 v = 1 if _bool(v) else 0
             elif k == "quantity":
@@ -237,7 +265,7 @@ class Database:
                 try:
                     self.conn.execute(f"UPDATE cards SET {', '.join(sets)} WHERE id=?", vals + [card_id])
                 except sqlite3.IntegrityError:
-                    # Foil-Umschaltung kollidiert mit vorhandenem Eintrag -> zusammenführen
+                    # Foil-/Proxy-Umschaltung kollidiert mit vorhandenem Eintrag -> zusammenführen
                     self.conn.rollback()
                     return self._merge_into_existing(card_id, changes)
                 self._bump()
@@ -246,9 +274,12 @@ class Database:
 
     def _merge_into_existing(self, card_id, changes):
         src = self.get(card_id)
-        foil = 1 if _bool(changes.get("foil")) else 0
+        foil = (1 if _bool(changes["foil"]) else 0) if "foil" in changes else (1 if src["foil"] else 0)
+        tags_new = _as_list(changes["tags"]) if "tags" in changes else src["tags"]
+        proxy = 1 if is_proxy_tags(tags_new) else 0
         dst = self._row(self.conn.execute(
-            "SELECT * FROM cards WHERE scryfall_id=? AND foil=?", (src["scryfall_id"], foil)).fetchone())
+            "SELECT * FROM cards WHERE scryfall_id=? AND foil=? AND proxy=? AND id!=?",
+            (src["scryfall_id"], foil, proxy, card_id)).fetchone())
         qty = int(changes.get("quantity", src["quantity"]))
         tags = merge_tags(dst["tags"], _as_list(changes.get("tags", src["tags"])))
         self.conn.execute("UPDATE cards SET quantity=quantity+?, tags=?, updated_at=? WHERE id=?",
@@ -301,8 +332,8 @@ class Database:
         dup_min = int(dup_min or 0)
         if dup_min > 1:
             # Doppelte: alle Drucke einer Karte (normal + Foil, alle Editionen/Sprachen) zusammengezählt
-            where.append("COALESCE(oracle_id, name) IN (SELECT COALESCE(oracle_id, name) FROM cards "
-                         "GROUP BY COALESCE(oracle_id, name) HAVING SUM(quantity) >= ?)")
+            where.append("proxy = 0 AND COALESCE(oracle_id, name) IN (SELECT COALESCE(oracle_id, name) FROM cards "
+                         "WHERE proxy = 0 GROUP BY COALESCE(oracle_id, name) HAVING SUM(quantity) >= ?)")
             vals.append(dup_min)
         for term in (q or "").split():
             like = f"%{term}%"
@@ -356,6 +387,8 @@ class Database:
         dup_min = max(2, int(dup_min or 2))
         groups = {}
         for c in self.all():
+            if c["proxy"]:
+                continue
             g = groups.setdefault(c["oracle_id"] or c["name"], {"qty": 0, "prices": []})
             g["qty"] += c["quantity"]
             g["prices"] += [self.card_price(c)] * c["quantity"]
@@ -375,7 +408,7 @@ class Database:
         out = {}
         with self._lock:
             rows = self.conn.execute(
-                "SELECT id, collector_number, quantity, foil FROM cards WHERE set_code=?", (set_code.upper(),))
+                "SELECT id, collector_number, quantity, foil FROM cards WHERE set_code=? AND proxy=0", (set_code.upper(),))
             for cid, cn, qty, foil in rows:
                 o = out.setdefault(cn, {"quantity": 0, "foil": 0, "ids": []})
                 o["quantity"] += qty
@@ -387,7 +420,7 @@ class Database:
         with self._lock:
             return [dict(zip(("set_code", "set_name", "prints", "cards"), r)) for r in self.conn.execute(
                 "SELECT set_code, MAX(set_name), COUNT(DISTINCT collector_number), SUM(quantity) FROM cards "
-                "WHERE set_code IS NOT NULL AND set_code != '' GROUP BY set_code")]
+                "WHERE set_code IS NOT NULL AND set_code != '' AND proxy=0 GROUP BY set_code")]
 
     def all(self):
         with self._lock:
@@ -402,7 +435,12 @@ class Database:
 
     @staticmethod
     def card_price(c, currency="eur"):
-        """Preis einer Karte (Foil-Preis für Foils, sonst normal; Fallback auf den jeweils anderen)."""
+        """Preis einer Karte (Foil-Preis für Foils, sonst normal; Fallback auf den jeweils anderen).
+
+        Proxies haben keinen Sammlungswert (0).
+        """
+        if c.get("proxy"):
+            return 0.0
         normal, foil = c.get(f"price_{currency}"), c.get(f"price_{currency}_foil")
         price = (foil or normal) if c.get("foil") else (normal or foil)
         try:
@@ -476,7 +514,8 @@ class Database:
             "foils": sum(c["quantity"] for c in cards if c["foil"]),
             "value_eur": round(sum(self.card_price(c) * c["quantity"] for c in cards), 2),
             "value_usd": round(sum(self.card_price(c, "usd") * c["quantity"] for c in cards), 2),
-            "without_price": sum(c["quantity"] for c in cards if not self.card_price(c)),
+            "without_price": sum(c["quantity"] for c in cards if not c["proxy"] and not self.card_price(c)),
+            "proxies": sum(c["quantity"] for c in cards if c["proxy"]),
             "by_color_identity": bucket(lambda c: c["color_identity"] or "C"),
             "by_rarity": sorted(bucket(lambda c: c["rarity"] or "?"),
                                 key=lambda b: rarity_order.index(b["key"]) if b["key"] in rarity_order else 99),

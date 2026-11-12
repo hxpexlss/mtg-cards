@@ -139,6 +139,7 @@ class BatchAdapter(
         h.name.text = it.name
         val where = listOfNotNull(it.setCode?.uppercase(), it.cn?.let { cn -> "#$cn" }).joinToString(" ")
         h.sub.text = buildString {
+            if (it.proxy) append("🅿 Proxy · ")
             if (where.isNotBlank()) append(where).append(" · ")
             append(if (it.scryfallId == null) "offline – wird geprüft" else euro(it.unitPrice))
             if (it.quantity > 1 && it.unitPrice != null) append(" · zus. ${euro(it.unitPrice!! * it.quantity)}")

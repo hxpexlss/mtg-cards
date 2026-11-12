@@ -35,7 +35,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_1.6.3_all.deb
+sudo apt install ./mtg-cards-desktop_1.7.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -50,7 +50,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_1.6.3_all.deb
+sudo apt install ./mtg-cards-server_1.7.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -68,6 +68,12 @@ APK aufs Handy kopieren und installieren („Installation aus unbekannten Quelle
 Unter **Verbindung** → „Im WLAN suchen“ oder Adresse eintragen, Token eingeben, „Speichern & testen“.
 
 ## Verbindung: WLAN und Tailscale
+
+Die App wiederholt Anfragen bei kurzen Verbindungsabbrüchen automatisch und trägt offline gemerkte Scans alle
+30 Sekunden nach. Unter **Verbindung → Verbindungsprotokoll** stehen die letzten Fehler mit Uhrzeit.
+Bei häufigen Abbrüchen über Tailscale: in den Android-Einstellungen für die **Tailscale-App den Akku-Sparmodus
+deaktivieren** („Nicht optimieren“/„Uneingeschränkt“) und in Tailscale „Always-on VPN“ einschalten.
+
 
 - **WLAN**: Die App findet PC/Server automatisch per UDP-Broadcast (Port 47811). Alternativ die IP eintragen,
   z.B. `192.168.1.20` – Port 8765 wird automatisch ergänzt.
@@ -191,6 +197,18 @@ Tab **Sets** (PC) bzw. **Suche → Editionen & Sammelfortschritt** (App):
 In der Sammlung (PC: Seitenleiste „Doppelte“, App: Chip „Doppelte (ab 2)“): zeigt alle Karten, die du **ab 2**
 (oder 3/4/5) Mal besitzt – über alle Drucke, Editionen, Sprachen und Foil zusammengezählt. Dazu eine Zusammenfassung:
 Anzahl überzähliger Exemplare und deren Wert (das wertvollste Exemplar jeder Karte wird dabei behalten).
+
+## Proxy-Karten in der Sammlung
+
+Proxies bekommen den Tag **„Proxies“** und werden immer als **eigener Eintrag** gespeichert – getrennt von echten
+Karten desselben Drucks.
+
+- **Scannen:** Schalter **„Proxy“** unten in der Scan-Ansicht – solange er an ist, bekommt jede gescannte Karte
+  den Tag (auch im Stapel-Modus und offline).
+- **Am PC:** Checkbox „Proxy“ im Dialog „Karte hinzufügen“, oder den Tag in den Kartendetails setzen/entfernen.
+- Proxies zählen **nicht** zum Sammlungswert, Set-Fortschritt und zu den Doppelten und erfüllen keine Wünsche.
+  Im Deck bleibt eine Karte „fehlend“, zeigt aber „🅿 n“, wenn ein Proxy vorhanden ist.
+- Filter „Proxies“ in der Suche (App und PC), Kennzeichnung „PROXY“ bzw. 🅿.
 
 ## Proxies drucken
 

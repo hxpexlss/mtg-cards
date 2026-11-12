@@ -135,6 +135,7 @@ function deckCardHtml(c) {
     <span class="st" title="${esc(tip)}">${status}</span>
     <span class="n" data-img="${esc(c.image_url || "")}" title="${esc(tip)}">${esc(c.name)}${c.missing && c.owned ? ` <span class="small">(${c.owned}/${c.quantity})</span>` : ""}</span>
     ${c.outside_identity ? `<span class="warn" title="Außerhalb der Farbidentität des Commanders">⚠</span>` : ""}
+    ${c.proxies ? `<span class="pill proxy" title="${c.proxies} Proxy in der Sammlung">🅿 ${c.proxies}</span>` : ""}
     ${manaHtml(c.mana_cost)}
     <span class="acts">
       <button data-op="inc" title="+1">＋</button><button data-op="dec" title="−1">−</button>

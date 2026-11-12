@@ -64,7 +64,7 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
 
         // Tags: höchstens einer (singleSelection im Layout)
         val tagGroup = view.findViewById<ChipGroup>(R.id.tagChips)
-        for (t in listOf("Commander", "Partner", "Companion")) filterChip(tagGroup, t, t)
+        for (t in listOf("Commander", "Partner", "Companion", PROXY_TAG)) filterChip(tagGroup, t, t)
         tagGroup.setOnCheckedStateChangeListener { group, ids ->
             tagFilter = ids.firstOrNull()?.let { group.findViewById<Chip>(it)?.tag?.toString() } ?: ""
             search()
@@ -146,7 +146,8 @@ class CardAdapter(
         val tagText = (0 until (tags?.length() ?: 0)).joinToString(" ") { "#" + tags!!.getString(it) }
         val ci = c.optString("color_identity").ifBlank { "C" }
         holder.sub.text = "${c.optString("set_code")} #${c.optString("collector_number")} · $ci  $tagText"
-        holder.qty.text = "${c.optInt("quantity")}×" + if (c.optBoolean("foil")) " ✦" else ""
+        holder.qty.text = "${c.optInt("quantity")}×" + (if (c.optBoolean("foil")) " ✦" else "") +
+            (if (c.optBoolean("proxy")) " 🅿" else "")
         ImageLoader.load(scope, c.optString("image_url"), holder.image, 4)
         holder.itemView.setOnClickListener { onClick(c.optLong("id")) }
     }

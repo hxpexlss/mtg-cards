@@ -35,6 +35,12 @@ object Prefs {
         sp(ctx).edit().putString("scan_lang", value).apply()
     }
 
+    /** Proxy-Modus beim Scannen: alle Karten bekommen den Tag "Proxies". */
+    fun proxyMode(ctx: Context): Boolean = sp(ctx).getBoolean("proxy_mode", false)
+    fun setProxyMode(ctx: Context, value: Boolean) {
+        sp(ctx).edit().putBoolean("proxy_mode", value).apply()
+    }
+
     fun landscape(ctx: Context): Boolean = sp(ctx).getBoolean("landscape", false)
     fun setLandscape(ctx: Context, value: Boolean) {
         sp(ctx).edit().putBoolean("landscape", value).apply()

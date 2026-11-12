@@ -90,9 +90,11 @@ class DeckStore:
             db.conn.commit()
 
     # -- Hilfen ---------------------------------------------------------------
-    def _owned_maps(self):
+    def _owned_maps(self, proxy=0):
+        """Bestand nach oracle_id und Name; proxy=0 echte Karten, proxy=1 nur Proxies."""
         by_oracle, by_name = {}, {}
-        for oid, name, qty in self.db.conn.execute("SELECT oracle_id, name, quantity FROM cards"):
+        for oid, name, qty in self.db.conn.execute(
+                "SELECT oracle_id, name, quantity FROM cards WHERE proxy=?", (proxy,)):
             if oid:
                 by_oracle[oid] = by_oracle.get(oid, 0) + qty
             key = (name or "").lower()
@@ -186,6 +188,7 @@ class DeckStore:
             cards = [self._card_row(r) for r in self.db.conn.execute(
                 "SELECT * FROM deck_cards WHERE deck_id=? ORDER BY name COLLATE NOCASE", (deck_id,))]
             by_oracle, by_name = self._owned_maps()
+            px_oracle, px_name = self._owned_maps(proxy=1)
             use_oracle, use_name = self.usage_maps()
 
         commanders = [c for c in cards if c["board"] == "commander"]
@@ -197,6 +200,8 @@ class DeckStore:
             if owned is None:
                 owned = by_name.get(c["name"].lower(), 0)
             c["owned"] = owned
+            px = px_oracle.get(c["oracle_id"]) if c["oracle_id"] else None
+            c["proxies"] = px if px is not None else px_name.get(c["name"].lower(), 0)
             c["basic"] = "Basic Land" in (c["type_line"] or "")
             c["missing"] = 0 if c["basic"] else max(0, c["quantity"] - owned)
             uses = (use_oracle.get(c["oracle_id"]) if c["oracle_id"] else None) or use_name.get(c["name"].lower(), [])
