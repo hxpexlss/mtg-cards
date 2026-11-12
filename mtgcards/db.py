@@ -129,8 +129,21 @@ class Database:
             self.conn.executescript(INDEXES)
             self.conn.commit()
 
+    def _tag_tokens_once(self):
+        """Einmalig: vorhandene Token-Karten bekommen den automatischen Tag "Token"."""
+        done = self.conn.execute("SELECT value FROM meta WHERE key='token_tag_v1'").fetchone()
+        if done:
+            return
+        for cid, tags in self.conn.execute(
+                "SELECT id, tags FROM cards WHERE type_line LIKE 'Token%'").fetchall():
+            tag_list = _as_list(tags)
+            if "Token" not in tag_list:
+                self.conn.execute("UPDATE cards SET tags=? WHERE id=?", (json.dumps(tag_list + ["Token"]), cid))
+        self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('token_tag_v1', '1')")
+
     def _migrate(self):
         """Ältere Datenbanken: Spalte 'proxy' ergänzen (Proxies sind eigene Einträge)."""
+        self._tag_tokens_once()
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(cards)")}
         if "proxy" not in cols:
             self.conn.execute("ALTER TABLE cards ADD COLUMN proxy INTEGER NOT NULL DEFAULT 0")

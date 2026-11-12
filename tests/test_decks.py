@@ -87,6 +87,28 @@ class TestDeckStore(unittest.TestCase):
         self.assertEqual({d["name"]: d["status"] for d in DeckStore(other).list()},
                          {"Precon": "owned", "Neues Deck": "build"})
 
+    def test_roles_commander_partner_companion(self):
+        from fixtures import KRAUM
+        deck = self.store.create("Rollen")
+        d = self.store.import_list(deck["id"], FakeScryfall(),
+                                   "Commander\n1 Kraum, Ludevic's Opus\n1 Atraxa, Praetors' Voice\n"
+                                   "Companion\n1 Lurrus of the Dream-Den\nDeck\n1 Sol Ring")["deck"]
+        self.assertEqual(sorted(d["commanders"]), ["Atraxa, Praetors' Voice", "Kraum, Ludevic's Opus"])
+        self.assertEqual(d["companions"], ["Lurrus of the Dream-Den"])
+        cards = {c["name"]: c for c in d["cards"]}
+        self.assertIsNone(cards["Kraum, Ludevic's Opus"]["warning"])          # hat Partner
+        self.assertIn("Partner", cards["Atraxa, Praetors' Voice"]["warning"])  # hat kein Partner
+        self.assertIsNone(cards["Lurrus of the Dream-Den"]["warning"])
+        self.assertEqual(cards["Lurrus of the Dream-Den"]["group"], "Companion")
+        self.assertEqual(d["stats"]["missing"], 2)    # Kraum + Lurrus fehlen (Sol Ring & Atraxa vorhanden)
+        sol = cards["Sol Ring"]
+        d = self.store.update_card(sol["id"], {"board": "commander"})
+        self.assertIn("legendär", next(c for c in d["cards"] if c["name"] == "Sol Ring")["warning"])
+        text = self.store.export_text(deck["id"])
+        self.assertIn("Companion\n1 Lurrus of the Dream-Den", text)
+        self.assertEqual(parse_decklist("Companion\n1 Lurrus of the Dream-Den")[0]["board"], "companion")
+        self.assertEqual(normalize_card(KRAUM)["layout"], None)
+
     def test_card_ops(self):
         deck = self.store.create("Test")
         d = self.store.set_card(deck["id"], normalize_card(LURRUS), 1, "main")

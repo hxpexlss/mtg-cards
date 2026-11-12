@@ -109,6 +109,12 @@ label.check { display: flex; align-items: center; gap: 6px; color: var(--text); 
 .tag.t-Partner { border-color: #4fb3d9; color: #4fb3d9; }
 .tag.t-Companion { border-color: #c77dff; color: #c77dff; }
 .tag.active.t-Commander, .tag.active.t-Partner, .tag.active.t-Companion { color: #fff; }
+.tag.t-Token { border-color: #6fbf73; color: #6fbf73; }
+.tag.active.t-Token { color: #fff; }
+.pill.role { font-size: 10px; padding: 0 6px; background: color-mix(in srgb, var(--accent2) 22%, transparent); color: var(--accent2); }
+.deck-roles { color: var(--muted); font-size: 13px; margin: -6px 0 12px; }
+.deck-roles b { color: var(--text); }
+.dc .rolewarn { color: var(--accent2); font-size: 12px; cursor: help; }
 .tag.t-Proxies { border-color: #9aa4b2; color: #9aa4b2; border-style: dashed; }
 .tag.active.t-Proxies { color: #fff; }
 .badge.proxy { top: auto; bottom: 64px; right: 8px; background: #59606b; letter-spacing: .08em; font-size: 11px; }

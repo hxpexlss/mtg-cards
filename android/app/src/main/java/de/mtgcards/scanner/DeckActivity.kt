@@ -21,7 +21,7 @@ class DeckActivity : AppCompatActivity() {
     private var deck: JSONObject? = null
 
     private val groupTitles = mapOf(
-        "Commander" to "Commander", "Creature" to "Kreaturen", "Planeswalker" to "Planeswalker",
+        "Commander" to "Commander", "Companion" to "Companion", "Creature" to "Kreaturen", "Planeswalker" to "Planeswalker",
         "Battle" to "Schlachten", "Instant" to "Spontanzauber", "Sorcery" to "Hexereien",
         "Artifact" to "Artefakte", "Enchantment" to "Verzauberungen", "Land" to "Länder",
         "Sonstige" to "Sonstige", "side" to "Sideboard", "maybe" to "Vielleicht",
@@ -81,6 +81,13 @@ class DeckActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.deckSummary).text = buildString {
             append("${st.optInt("cards")} Karten · ${st.optInt("owned")} vorhanden · ${st.optInt("missing")} fehlen")
             if (ci.isNotBlank()) append(" · Farbidentität $ci")
+            val cmd = d.optJSONArray("commanders")
+            val comp = d.optJSONArray("companions")
+            if (cmd != null && cmd.length() > 0) append("\nCommander${if (cmd.length() > 1) " (Partner)" else ""}: " +
+                (0 until cmd.length()).joinToString(" & ") { cmd.getString(it) })
+            else append("\nNoch kein Commander – Karte antippen → „Als Commander“")
+            if (comp != null && comp.length() > 0) append("\nCompanion: " +
+                (0 until comp.length()).joinToString(", ") { comp.getString(it) })
             if (st.optInt("shared") > 0) append("\n⇄ ${st.optInt("shared")} Karte(n) mit anderen Decks geteilt – " +
                 "für alle Decks gleichzeitig fehlen ${st.optInt("missing_reserved")}")
             if (st.optInt("outside_identity") > 0) append("\n⚠ ${st.optInt("outside_identity")} Karte(n) außerhalb der Farbidentität")
@@ -90,7 +97,7 @@ class DeckActivity : AppCompatActivity() {
         val arr = d.getJSONArray("cards")
         val cards = (0 until arr.length()).map { arr.getJSONObject(it) }
             .filter { !onlyMissing || it.optInt("missing") > 0 }
-        val order = listOf("Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery",
+        val order = listOf("Commander", "Companion", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery",
             "Artifact", "Enchantment", "Land", "Sonstige", "side", "maybe")
         val grouped = cards.groupBy { c ->
             val board = c.optString("board")
@@ -120,11 +127,15 @@ class DeckActivity : AppCompatActivity() {
                     val others = (0 until (od?.length() ?: 0)).joinToString(", ") { od!!.getJSONObject(it).optString("deck") }
                     val owned = c.optInt("owned")
                     val extra = if (missing > 0 && owned > 0) "  ($owned/${c.optInt("quantity")})" else ""
-                    val warn = if (c.optBoolean("outside_identity")) "  ⚠" else ""
+                    val warn = (if (c.optBoolean("outside_identity")) "  ⚠" else "") +
+                        (if (!c.isNull("warning") && c.optString("warning").isNotBlank()) "  ⚠ ${c.optString("warning")}" else "")
                     val also = if (others.isNotBlank()) "\n      auch in: $others" else ""
                     text = "$status  ${c.optInt("quantity")}  ${c.optString("name")}$extra$warn$also"
                     textSize = 15f
                     setPadding(0, (3 * dp).toInt(), 0, (3 * dp).toInt())
+                    val cardId = c.optLong("id")
+                    val board = c.optString("board")
+                    setOnClickListener { cardRoleDialog(cardId, c.optString("name"), board) }
                     if (!basic && missing > 0) setTextColor(Color.rgb(229, 72, 77))
                     else if (!basic && shared) setTextColor(Color.rgb(226, 160, 63))
                 })
@@ -136,6 +147,35 @@ class DeckActivity : AppCompatActivity() {
                 setPadding(0, (20 * dp).toInt(), 0, 0)
             })
         }
+    }
+
+    /** Rolle einer Karte im Deck festlegen. */
+    private fun cardRoleDialog(cardId: Long, name: String, board: String) {
+        val options = listOf(
+            "commander" to "★ Als Commander (auch Partner)",
+            "companion" to "🅲 Als Companion",
+            "main" to "Ins Deck",
+            "side" to "Ins Sideboard",
+            "delete" to "Aus dem Deck entfernen",
+        ).filter { it.first != board }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(options.map { it.second }.toTypedArray()) { _, which ->
+                val choice = options[which].first
+                lifecycleScope.launch {
+                    try {
+                        val api = Api.fromPrefs(this@DeckActivity)
+                        val res = if (choice == "delete") api.deckCardDelete(cardId)
+                        else api.deckCardUpdate(cardId, JSONObject().put("board", choice))
+                        deck = res
+                        render(res)
+                    } catch (e: ApiException) {
+                        Toast.makeText(this@DeckActivity, e.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
     }
 
     private fun shareMissing() {

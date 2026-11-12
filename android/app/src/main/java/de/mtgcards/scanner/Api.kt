@@ -221,6 +221,11 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun deck(id: Long) = json("GET", "/api/decks/$id")
 
+    /** Karte im Deck ändern: {"board": "commander"|"companion"|"main"|"side"} oder {"quantity": n}. */
+    suspend fun deckCardUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/deck-cards/$id", changes)
+
+    suspend fun deckCardDelete(id: Long) = json("DELETE", "/api/deck-cards/$id")
+
     /** Deck ändern (z.B. Status "owned" = Besitz / "build" = Bau). */
     suspend fun deckUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/decks/$id", changes)
 

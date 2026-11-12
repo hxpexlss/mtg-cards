@@ -64,7 +64,7 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
 
         // Tags: höchstens einer (singleSelection im Layout)
         val tagGroup = view.findViewById<ChipGroup>(R.id.tagChips)
-        for (t in listOf("Commander", "Partner", "Companion", PROXY_TAG)) filterChip(tagGroup, t, t)
+        for (t in listOf("Commander", "Partner", "Companion", "Token", PROXY_TAG)) filterChip(tagGroup, t, t)
         tagGroup.setOnCheckedStateChangeListener { group, ids ->
             tagFilter = ids.firstOrNull()?.let { group.findViewById<Chip>(it)?.tag?.toString() } ?: ""
             search()

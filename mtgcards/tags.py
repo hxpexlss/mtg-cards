@@ -2,7 +2,7 @@
 
 import re
 
-AUTO_TAGS = ("Commander", "Partner", "Companion")
+AUTO_TAGS = ("Commander", "Partner", "Companion", "Token")
 
 _PARTNER_KEYWORDS = {"partner", "partner with", "friends forever"}
 _PARTNER_RE = re.compile(r"^(partner|partner with [^\n(]+|friends forever)\s*(\(|$)", re.I | re.M)
@@ -24,7 +24,8 @@ def auto_tags(card):
     text = card.get("oracle_text") or ""
     keywords = {str(k).lower() for k in (card.get("keywords") or [])}
 
-    is_legendary_creature = "legendary" in front and "creature" in front
+    is_token = (card.get("type_line") or "").startswith("Token") or card.get("layout") in ("token", "double_faced_token")
+    is_legendary_creature = "legendary" in front and "creature" in front and not is_token
     if is_legendary_creature or "can be your commander" in text.lower():
         tags.append("Commander")
 
@@ -33,6 +34,10 @@ def auto_tags(card):
 
     if "companion" in keywords or _COMPANION_RE.search(text):
         tags.append("Companion")
+
+    # Spielsteine: Typzeile "Token Creature — Goblin", "Token Artifact — Treasure" …
+    if is_token:
+        tags.append("Token")
 
     return tags
 

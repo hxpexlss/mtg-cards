@@ -46,6 +46,18 @@ class TestNormalizeAndTags(unittest.TestCase):
     def test_german_printed_name(self):
         self.assertEqual(normalize_card(ATRAXA_DE)["printed_name"], "Atraxa, Stimme der Prätoren")
 
+    def test_token_tag(self):
+        from mtgcards.tags import auto_tags
+        self.assertIn("Token", auto_tags({"type_line": "Token Creature — Goblin", "keywords": []}))
+        self.assertIn("Token", auto_tags({"type_line": "Token Artifact — Treasure", "keywords": []}))
+        self.assertNotIn("Token", auto_tags({"type_line": "Creature — Goblin", "keywords": []}))
+        self.assertEqual(auto_tags({"type_line": "Token Legendary Creature — Dragon", "keywords": []}), ["Token"])
+        db = Database(":memory:")
+        db.conn.execute("DELETE FROM meta WHERE key='token_tag_v1'")
+        db.conn.execute("INSERT INTO cards(name, type_line, tags) VALUES('Goblin', 'Token Creature — Goblin', '[]')")
+        db._tag_tokens_once()
+        self.assertEqual(db.all()[0]["tags"], ["Token"])
+
     def test_text_only_partner_with(self):
         from mtgcards.tags import auto_tags
         card = {"type_line": "Legendary Creature — Human", "keywords": [],

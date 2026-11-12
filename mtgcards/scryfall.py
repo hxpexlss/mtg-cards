@@ -113,6 +113,7 @@ def normalize_card(raw):
         "mana_cost": mana_cost or "",
         "cmc": raw.get("cmc"),
         "type_line": raw.get("type_line") or " // ".join(f.get("type_line", "") for f in faces),
+        "layout": raw.get("layout"),
         "oracle_text": oracle or "",
         "power": first(pick("power")),
         "toughness": first(pick("toughness")),
