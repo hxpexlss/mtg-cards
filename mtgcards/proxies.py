@@ -55,6 +55,34 @@ def card_images(raw):
     return [u for u in out if u]
 
 
+LOWRES = ("lowres", "placeholder", "missing")
+
+
+def sharper_print(scryfall, raw):
+    """Scryfall hat nicht für jeden Druck einen hochauflösenden Scan (oft fremdsprachige oder alte Drucke).
+    Dann gleiches Artwork in guter Qualität suchen: 1. englische Fassung desselben Drucks, 2. anderer Druck
+    mit demselben Artwork. Gibt die bessere Karte zurück oder die ursprüngliche."""
+    if raw.get("image_status") not in LOWRES:
+        return raw
+    candidates = []
+    if (raw.get("lang") or "en") != "en" and hasattr(scryfall, "by_set_number"):
+        try:
+            candidates.append(scryfall.by_set_number(raw["set"], raw["collector_number"]))
+        except (ScryfallError, KeyError):
+            pass
+    if hasattr(scryfall, "prints"):
+        try:
+            same_art = [p for p in scryfall.prints(raw.get("name") or "")
+                        if p.get("illustration_id") and p.get("illustration_id") == raw.get("illustration_id")]
+            candidates += same_art[::-1]       # neueste zuerst
+        except ScryfallError:
+            pass
+    for c in candidates:
+        if c.get("image_status") not in LOWRES and card_images(c):
+            return c
+    return raw
+
+
 def fetch_image(url, cache_dir=None, timeout=20):
     """Lädt ein Bild (mit Datei-Cache). Gibt Bytes oder None zurück."""
     path = None
@@ -63,11 +91,16 @@ def fetch_image(url, cache_dir=None, timeout=20):
         if os.path.exists(path):
             with open(path, "rb") as f:
                 return f.read()
-    try:
-        req = Request(url, headers={"User-Agent": f"MTGCardsCollection/{__version__}", "Accept": "image/*"})
-        with urlopen(req, timeout=timeout) as r:
-            data = r.read()
-    except OSError:
+    data = None
+    for attempt in range(3):          # einzelne hängende Downloads sollen keinen Text-Proxy erzwingen
+        try:
+            req = Request(url, headers={"User-Agent": f"MTGCardsCollection/{__version__}", "Accept": "image/*"})
+            with urlopen(req, timeout=timeout) as r:
+                data = r.read()
+            break
+        except OSError:
+            data = None
+    if data is None:
         return None
     if not jpeg_info(data):
         return None
@@ -81,7 +114,7 @@ def fetch_image(url, cache_dir=None, timeout=20):
     return data
 
 
-def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image):
+def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image, sharpen=True):
     """items: [{"name", "scryfall_id"(opt), "copies"}] -> Liste druckbarer Karten (pro Exemplar/Seite ein Eintrag)."""
     entries, errors = [], []
     for it in items:
@@ -95,6 +128,8 @@ def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image):
         except ScryfallError as e:
             errors.append(f"{it['name']}: {e}")
         faces = []
+        if raw and sharpen:
+            raw = sharper_print(scryfall, raw)
         if raw:
             for url in card_images(raw):
                 img = fetch(url, cache_dir)

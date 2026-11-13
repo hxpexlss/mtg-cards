@@ -19,6 +19,8 @@ function openProxyDialog({ title, url, ids, info }) {
         <option value="1">1 mm</option><option value="2">2 mm</option><option value="3">3 mm</option></select></label>
     </div>
     <label class="check"><input type="checkbox" id="px-cut" checked> Schnittmarken</label>
+    <label class="check" title="Scryfall hat für manche Drucke (oft fremdsprachige oder alte) nur unscharfe Bilder"><input type="checkbox" id="px-hq" checked>
+      Unscharfe Bilder durch einen scharfen Scan mit gleichem Artwork ersetzen (ggf. englischer Text)</label>
     <p class="muted small">Beim Drucken <b>„Tatsächliche Größe“ / 100 %</b> wählen (nicht „An Seite anpassen“).
       Doppelseitige Karten erhalten beide Seiten. Nur für Playtests und den privaten Gebrauch.</p>
     <footer><span class="spacer"></span>
@@ -29,7 +31,7 @@ function openProxyDialog({ title, url, ids, info }) {
   $("#proxy-form", dlg).addEventListener("submit", (ev) => {
     ev.preventDefault();
     const p = new URLSearchParams({ paper: $("#px-paper").value, gap: $("#px-gap").value,
-      cut: $("#px-cut").checked ? "1" : "0", token: state.token || "" });
+      cut: $("#px-cut").checked ? "1" : "0", hq: $("#px-hq").checked ? "1" : "0", token: state.token || "" });
     if ($("#px-copies").value) p.set("copies", $("#px-copies").value);
     if (ids && ids.length) p.set("ids", ids.join(","));
     let link = $("#px-link");
