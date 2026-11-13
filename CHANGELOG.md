@@ -4,6 +4,14 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [2.1.1] – 2026-11-13
+
+### Behoben
+- **Unscharfe Karten im Proxy-PDF:** Scryfall hat für manche Drucke – oft fremdsprachige, alte Karten und Promos – nur
+  einen unscharfen Scan. Dann wird jetzt automatisch ein scharfer Scan mit demselben Artwork genommen (zuerst die
+  englische Fassung desselben Drucks, sonst ein anderer Druck mit gleichem Bild). Am PC im Druck-Dialog abschaltbar.
+- Hängt ein einzelner Bild-Download, wird es bis zu dreimal versucht, statt die Karte nur als Text-Proxy zu drucken.
+
 ## [2.1.0] – 2026-11-13
 
 ### Neu

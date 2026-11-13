@@ -950,7 +950,8 @@ def _send_proxies(h, qs, items, title, filename, entries=None):
         if not items:
             raise ApiError(400, "Keine Karten ausgewählt")
         entries, errors = proxies.collect_entries(h.ctx.scryfall, items, _proxy_cache_dir(h),
-                                                  fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image))
+                                                  fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image),
+                                                  sharpen=_first(qs, "hq", "1") != "0")
         if not entries:
             raise ApiError(404, "Keine Karten gefunden: " + "; ".join(errors))
     if not entries:
