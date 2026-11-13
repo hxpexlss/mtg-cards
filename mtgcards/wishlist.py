@@ -151,6 +151,32 @@ class Wishlist:
                 self.db.conn.commit()
         return self.get(wid)
 
+    def set_print(self, wid, card=None, cheapest=None):
+        """Druck festlegen (card = normalisierte Scryfall-Karte) oder mit card=None wieder "beliebiger Druck"
+        (cheapest = (Preis, Edition) des günstigsten Drucks). Preis und Bild folgen dem gewählten Druck."""
+        ts = now_iso()
+        with self.db._lock:
+            r = self.db.conn.execute("SELECT foil FROM wishlist WHERE id=?", (wid,)).fetchone()
+            if not r:
+                return None
+            if card:
+                price = _price(card, bool(r[0]))
+                self.db.conn.execute(
+                    """UPDATE wishlist SET scryfall_id=?, set_code=?, collector_number=?, image_url=COALESCE(?, image_url),
+                       price_eur=?, price_set=?, price_checked_at=?, updated_at=? WHERE id=?""",
+                    (card.get("scryfall_id"), card.get("set_code"), card.get("collector_number"), card.get("image_url"),
+                     price, card.get("set_code"), ts if price is not None else None, ts, wid))
+            else:
+                price, pset = cheapest or (None, None)
+                self.db.conn.execute(
+                    """UPDATE wishlist SET scryfall_id=NULL, price_eur=COALESCE(?, price_eur),
+                       price_set=COALESCE(?, price_set), price_checked_at=?, updated_at=? WHERE id=?""",
+                    (price, pset, ts if price is not None else None, ts, wid))
+            self._update_target_flag(wid)
+            self.db._bump()
+            self.db.conn.commit()
+        return self.get(wid)
+
     def delete(self, wid):
         with self.db._lock:
             cur = self.db.conn.execute("DELETE FROM wishlist WHERE id=?", (wid,))
@@ -203,6 +229,9 @@ class Wishlist:
             rows = [dict(r) for r in self.db.conn.execute("SELECT * FROM wishlist")]
         specific = [r["scryfall_id"] for r in rows if r["scryfall_id"]]
         fetched = scryfall.collection(specific) if specific else {}
+        # Fremdsprachige Drucke (z.B. deutscher Proxy-Druck) haben bei Scryfall keine Preise -> englischer Druck
+        if fetched and hasattr(scryfall, "fill_prices"):
+            fetched = scryfall.fill_prices(fetched)
         updated = 0
         for r in rows:
             price, pset = None, r["price_set"]

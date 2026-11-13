@@ -45,6 +45,9 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             ProxyPdf.ask(requireContext(), viewLifecycleOwner.lifecycleScope, "/api/wishlist/proxies.pdf",
                 "proxies-wunschliste.pdf")
         }
+        view.findViewById<Button>(R.id.wishCustom).setOnClickListener {
+            startActivity(android.content.Intent(requireContext(), CustomProxiesActivity::class.java))
+        }
         PriceAlertWorker.schedule(requireContext())
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(requireContext(),
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -153,7 +156,7 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             .setTitle(w.optString("name") + if (w.optBoolean("foil")) " ✦" else "")
             .setView(android.widget.ScrollView(ctx).apply { addView(box) })
             .setPositiveButton("Bearbeiten") { _, _ -> editWish(w) }
-            .setNeutralButton("Entfernen") { _, _ -> deleteWish(w) }
+            .setNeutralButton("Druck wählen") { _, _ -> choosePrint(w) }
             .setNegativeButton("Schließen", null)
             .show()
         // Regeltext nachladen (aus dem Scryfall-Cache des Servers)
@@ -169,6 +172,26 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             } catch (_: ApiException) {
             }
         }
+    }
+
+    /** Druck festlegen: bestimmte Edition/Sprache (Proxy-Bild + Preis) oder wieder "beliebig" (günstigster). */
+    private fun choosePrint(w: JSONObject) {
+        val ctx = requireContext()
+        val current = if (w.optBoolean("any_print")) "beliebig (günstigster)"
+        else "${w.optString("set_code")} #${w.optString("collector_number")}"
+        AlertDialog.Builder(ctx)
+            .setTitle("Druck für ${w.optString("name")}")
+            .setMessage("Aktuell: $current\n\nDer gewählte Druck zählt für den Preis (Zielpreis-Alarm) und das Proxy-PDF.")
+            .setPositiveButton("Druck wählen …") { _, _ ->
+                PrintPicker.show(ctx, viewLifecycleOwner.lifecycleScope, w.optString("name"), "en", rememberSet = false) { picked ->
+                    update(w.optLong("id"), JSONObject().put("scryfall_id", picked.optString("scryfall_id")))
+                }
+            }
+            .setNeutralButton("Beliebig (günstigster)") { _, _ ->
+                update(w.optLong("id"), JSONObject().put("any_print", true))
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
     }
 
     private fun deleteWish(w: JSONObject) {

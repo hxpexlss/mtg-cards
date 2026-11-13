@@ -4,6 +4,18 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [2.1.0] – 2026-11-13
+
+### Neu
+- **Wunschliste: Druck wählen.** Für jeden Wunsch lässt sich eine bestimmte Edition und Sprache festlegen (oder wieder
+  „beliebig – günstigster Druck“). Der gewählte Druck zählt für den Preis und den Zielpreis-Alarm und wird im
+  Proxy-PDF gedruckt – z.B. deutsche Proxies oder ein bestimmtes Artwork. PC: „✎“ neben dem Druck, App: Wunsch
+  antippen → „Druck wählen“.
+- **Eigene Proxies:** Bilder von Fun-Karten, Alters oder selbst gestalteten Karten hochladen (JPEG, PNG, WebP …),
+  sie werden automatisch ins Kartenformat gebracht, gespeichert und lassen sich wie die Wunschliste als PDF
+  (9 pro Seite, Originalgröße) drucken – mit Anzahl, Namen und Notiz. PC: neuer Tab „Eigene Proxies“ (auch per
+  Drag & Drop), App: Wunschliste → „Eigene Proxies“. Die Bilder sind im JSON-Export enthalten.
+
 ## [2.0.1] – 2026-11-12
 
 ### Behoben

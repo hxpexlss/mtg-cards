@@ -34,6 +34,11 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".CustomProxiesActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".DeckActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />

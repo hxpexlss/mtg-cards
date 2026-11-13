@@ -21,6 +21,7 @@ from . import APP_NAME, __version__
 from .db import Database
 from .decks import DECK_BOARDS, DeckStore, parse_decklist
 from .wishlist import Wishlist
+from .customproxies import CustomProxies, CustomProxyError
 from .importexport import ImportAborted, export_csv, export_json, import_cards
 from .netinfo import DiscoveryResponder, local_addresses, tailscale_dns_name
 from . import tls
@@ -44,6 +45,7 @@ class AppContext:
         self.db = db
         self.decks = DeckStore(db)
         self.wishlist = Wishlist(db)
+        self.custom = CustomProxies(db)
         self.scryfall = scryfall
         self.token = token
         self.kind = kind            # "server" oder "desktop"
@@ -778,6 +780,25 @@ def r_wish_add(h, qs):
 
 def r_wish_patch(h, qs, wid):
     data = h.read_json()
+    if "scryfall_id" in data or data.get("any_print"):
+        # Druck wählen (für Proxies in dieser Edition/Sprache und den richtigen Preis) oder "beliebig"
+        sid = data.pop("scryfall_id", None)
+        data.pop("any_print", None)
+        w = h.ctx.wishlist.get(_card_id(wid))
+        if w is None:
+            raise ApiError(404, "Wunsch nicht gefunden")
+        try:
+            if sid:
+                card = normalize_card(h.ctx.scryfall.with_prices(h.ctx.scryfall.lookup(scryfall_id=sid)))
+                if w.get("oracle_id") and card.get("oracle_id") and card["oracle_id"] != w["oracle_id"]:
+                    raise ApiError(400, "Dieser Druck gehört zu einer anderen Karte")
+                h.ctx.wishlist.set_print(w["id"], card)
+            else:
+                h.ctx.wishlist.set_print(w["id"], None, h.ctx.wishlist.cheapest_print(h.ctx.scryfall, w["name"], w["foil"]))
+        except ScryfallError as e:
+            raise ApiError(e.status if e.status in (400, 404) else 502, str(e)) from None
+        if not data:
+            return h.send_json(h.ctx.wishlist.get(w["id"]))
     if "max_price_eur" in data:
         data["max_price_eur"] = _parse_price(data["max_price_eur"])
     if "quantity" in data:
@@ -930,14 +951,17 @@ def _proxy_cache_dir(h):
     return None if path == ":memory:" else os.path.join(os.path.dirname(os.path.abspath(path)), "proxy-images")
 
 
-def _send_proxies(h, qs, items, title, filename):
+def _send_proxies(h, qs, items, title, filename, entries=None):
     from . import proxies
-    if not items:
-        raise ApiError(400, "Keine Karten ausgewählt")
-    entries, errors = proxies.collect_entries(h.ctx.scryfall, items, _proxy_cache_dir(h),
-                                              fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image))
+    if entries is None:
+        if not items:
+            raise ApiError(400, "Keine Karten ausgewählt")
+        entries, errors = proxies.collect_entries(h.ctx.scryfall, items, _proxy_cache_dir(h),
+                                                  fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image))
+        if not entries:
+            raise ApiError(404, "Keine Karten gefunden: " + "; ".join(errors))
     if not entries:
-        raise ApiError(404, "Keine Karten gefunden: " + "; ".join(errors))
+        raise ApiError(400, "Keine Karten ausgewählt")
     try:
         gap = float(_first(qs, "gap", "0").replace(",", "."))
     except ValueError:
@@ -972,7 +996,58 @@ def r_deck_proxies(h, qs, did):
     _send_proxies(h, qs, items, f"MTG Cards Proxies - {deck['name']}", f"proxies-{safe}.pdf")
 
 
+# -- Eigene Proxies ----------------------------------------------------------------
+
+def r_custom_list(h, qs):
+    h.send_json(h.ctx.custom.list())
+
+
+def r_custom_add(h, qs):
+    data = h.read_json()
+    try:
+        item = h.ctx.custom.add(data.get("name"), data.get("image"), data.get("quantity") or 1, data.get("notes") or "")
+    except CustomProxyError as e:
+        raise ApiError(400, str(e)) from None
+    h.send_json(item, 201)
+
+
+def r_custom_patch(h, qs, pid):
+    try:
+        item = h.ctx.custom.update(_card_id(pid), h.read_json())
+    except CustomProxyError as e:
+        raise ApiError(400, str(e)) from None
+    if item is None:
+        raise ApiError(404, "Eigener Proxy nicht gefunden")
+    h.send_json(item)
+
+
+def r_custom_delete(h, qs, pid):
+    if not h.ctx.custom.delete(_card_id(pid)):
+        raise ApiError(404, "Eigener Proxy nicht gefunden")
+    h.send_json({"deleted": True})
+
+
+def r_custom_image(h, qs, pid):
+    img = h.ctx.custom.image(_card_id(pid))
+    if img is None:
+        raise ApiError(404, "Eigener Proxy nicht gefunden")
+    h.send_bytes(img, "image/jpeg", cache=True)
+
+
+def r_custom_pdf(h, qs):
+    """Proxy-PDF aus eigenen Bildern. ids=1,2 (leer = alle); copies=one für je 1 Exemplar."""
+    wanted = {int(x) for x in _first(qs, "ids").split(",") if x.strip().isdigit()}
+    entries = h.ctx.custom.entries(wanted, one=_first(qs, "copies", "") == "one")
+    _send_proxies(h, qs, None, "MTG Cards Proxies - Eigene Karten", "proxies-eigene.pdf", entries=entries)
+
+
 ROUTES = [
+    ("GET", r"/api/custom-proxies/proxies\.pdf", r_custom_pdf),
+    ("GET", r"/api/custom-proxies/(\d+)/image", r_custom_image),
+    ("GET", r"/api/custom-proxies", r_custom_list),
+    ("POST", r"/api/custom-proxies", r_custom_add),
+    ("PATCH", r"/api/custom-proxies/(\d+)", r_custom_patch),
+    ("DELETE", r"/api/custom-proxies/(\d+)", r_custom_delete),
     ("GET", r"/api/sets", r_sets),
     ("GET", r"/api/sets/([A-Za-z0-9]{2,8})", r_set_detail),
     ("POST", r"/api/wishlist/bulk", r_wish_bulk),
