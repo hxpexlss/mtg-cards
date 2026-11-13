@@ -8,6 +8,7 @@ from . import __version__
 from .db import CARD_FIELDS, EXPORT_FIELDS, _as_list, _bool, now_iso
 from .decks import export_decks, import_decks
 from .wishlist import export_wishlist, import_wishlist
+from .customproxies import CustomProxies, export_custom_proxies, import_custom_proxies
 from .scryfall import ScryfallError, normalize_card
 
 # Spaltennamen anderer Tools (Moxfield, Deckbox, ManaBox, ...) auf unsere abbilden
@@ -35,6 +36,7 @@ def export_json(db):
         "cards": cards,
         "decks": export_decks(db),
         "wishlist": export_wishlist(db),
+        "custom_proxies": export_custom_proxies(db),
     }, ensure_ascii=False, indent=2)
 
 
@@ -64,7 +66,8 @@ def _parse_import(text):
         data = json.loads(stripped)
         decks = None
         if isinstance(data, dict):
-            decks = {"decks": data.get("decks"), "wishlist": data.get("wishlist")}
+            decks = {"decks": data.get("decks"), "wishlist": data.get("wishlist"),
+                     "custom_proxies": data.get("custom_proxies")}
             data = data.get("cards", [])
         if not isinstance(data, list):
             raise ValueError("Unbekanntes JSON-Format")
@@ -108,7 +111,7 @@ def import_cards(db, scryfall, text, mode="add"):
     rows, extra = _parse_import(text)
     extra = extra or {}
     prepared, result = _prepare_rows(scryfall, rows)
-    has_extra = bool(extra.get("decks") or extra.get("wishlist"))
+    has_extra = bool(extra.get("decks") or extra.get("wishlist") or extra.get("custom_proxies"))
     if mode == "replace":
         if result["errors"]:
             shown = "\n".join(result["errors"][:15])
@@ -126,6 +129,7 @@ def import_cards(db, scryfall, text, mode="add"):
     from .wishlist import Wishlist
     DeckStore(db)
     Wishlist(db)
+    CustomProxies(db)
     with db._lock:  # gesamter Import in einer Transaktion
         db.conn.commit()
         try:
@@ -140,6 +144,9 @@ def import_cards(db, scryfall, text, mode="add"):
                 result["decks"] = import_decks(db, extra["decks"], replace=(mode == "replace"), _in_tx=True)
             if extra.get("wishlist") is not None:
                 result["wishlist"] = import_wishlist(db, extra["wishlist"], replace=(mode == "replace"), _in_tx=True)
+            if extra.get("custom_proxies") is not None:
+                result["custom_proxies"] = import_custom_proxies(db, extra["custom_proxies"],
+                                                                 replace=(mode == "replace"), _in_tx=True)
             db.commit()
         except Exception:
             db.conn.rollback()

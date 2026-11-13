@@ -34,6 +34,13 @@
         android:layout_height="wrap_content"
         android:text="🖨 Proxies drucken (PDF, 9 pro Seite)" />
 
+    <Button
+        android:id="@+id/wishCustom"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🖼 Eigene Proxies (Fun-Karten hochladen &amp; drucken)" />
+
     <TextView
         android:id="@+id/wishInfo"
         android:layout_width="match_parent"

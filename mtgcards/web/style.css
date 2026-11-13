@@ -361,3 +361,22 @@ dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(3px); }
   #decks-view .sidebar { display: block; width: 100%; height: auto; position: static; border-right: 0; }
   #decks-view { flex-direction: column; }
 }
+
+/* Wunschliste: Druck wählen */
+.wp-list { max-height: 55vh; overflow: auto; display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.wp-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; margin: 0; }
+.wp-item:hover { background: var(--bg2); }
+.wp-item.active { border-color: var(--accent); }
+.wp-item img { width: 40px; border-radius: 3px; }
+
+/* Eigene Proxies */
+.custom-upload .drop { border: 2px dashed var(--line, #555); border-radius: 12px; padding: 18px; text-align: center; margin-bottom: 10px; }
+.custom-upload .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.custom-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-top: 14px; }
+.custom-card { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.custom-card img { width: 100%; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 8px; cursor: zoom-in;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.custom-card .sel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); border-radius: 6px; padding: 2px 4px; margin: 0; }
+.custom-card .cn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom-card .row.tight { gap: 4px; flex-wrap: nowrap; }

@@ -246,6 +246,18 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun wishDelete(id: Long) = json("DELETE", "/api/wishlist/$id")
 
+    // -- Eigene Proxies (hochgeladene Bilder) ------------------------------------
+    suspend fun customProxies() = json("GET", "/api/custom-proxies")
+
+    suspend fun customAdd(name: String, jpegBase64: String, quantity: Int) = json("POST", "/api/custom-proxies",
+        JSONObject().put("name", name).put("image", jpegBase64).put("quantity", quantity))
+
+    suspend fun customUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/custom-proxies/$id", changes)
+
+    suspend fun customDelete(id: Long) = json("DELETE", "/api/custom-proxies/$id")
+
+    suspend fun customImage(id: Long) = download("/api/custom-proxies/$id/image")
+
     /** Stapel-Scan: alle Karten auf einmal speichern. */
     suspend fun addBatch(cards: org.json.JSONArray, requestId: String = newRequestId()) =
         json("POST", "/api/cards/batch", JSONObject().put("cards", cards).put("request_id", requestId))
