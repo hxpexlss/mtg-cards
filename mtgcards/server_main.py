@@ -26,6 +26,9 @@ def main(argv=None):
     p.add_argument("--show-fingerprint", action="store_true", help="Zertifikats-Fingerabdruck anzeigen")
     p.add_argument("--export", metavar="DATEI", help="Sammlung exportieren (.json oder .csv; '-' = stdout)")
     p.add_argument("--import", dest="import_file", metavar="DATEI", help="Sammlung importieren (JSON/CSV)")
+    p.add_argument("--export-proxies", metavar="DATEI",
+                   help="Proxie Maker sichern (Drucklisten, Decks, Bilder; .json, '-' = stdout)")
+    p.add_argument("--import-proxies", metavar="DATEI", help="Proxie-Maker-Sicherung einlesen (.json)")
     p.add_argument("--replace", action="store_true", help="Beim Import Sammlung ersetzen statt ergänzen")
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
@@ -55,6 +58,8 @@ def main(argv=None):
 
     if args.export or args.import_file:
         return offline_io(args, args.db or cfg["db_path"])
+    if args.export_proxies or args.import_proxies:
+        return proxies_io(args, os.path.join(os.path.dirname(os.path.abspath(args.db or cfg["db_path"])), "proxies.db"))
 
     bind = args.bind or cfg["bind"]
     port = args.port or int(cfg["port"])
@@ -125,6 +130,29 @@ def _share_with_service(cert, key):
         os.chmod(key, 0o640)
     except (KeyError, PermissionError, OSError):
         pass
+
+
+def proxies_io(args, path):
+    import json
+    from .pm.store import Store
+
+    store = Store(path)
+    try:
+        if args.export_proxies:
+            data = json.dumps(store.export_all(), ensure_ascii=False)
+            if args.export_proxies == "-":
+                sys.stdout.write(data)
+            else:
+                with open(args.export_proxies, "w", encoding="utf-8") as f:
+                    f.write(data)
+                print(f"Proxie-Maker-Sicherung geschrieben: {args.export_proxies}", file=sys.stderr)
+        if args.import_proxies:
+            with open(args.import_proxies, encoding="utf-8-sig") as f:
+                res = store.import_all(json.load(f), replace=args.replace)
+            print(f"{res['projects']} Drucklisten/Decks, {res['items']} Karten importiert")
+    finally:
+        store.close()
+    return 0
 
 
 def offline_io(args, db_path):

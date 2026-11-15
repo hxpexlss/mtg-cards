@@ -15,6 +15,20 @@ if [ "$1" = "configure" ]; then
     chown root:mtgcards "$CONF"
     chmod 0640 "$CONF"
 
+    # Ab Version 3: Proxie Maker ist Teil von MTG Cards – Daten des früheren Einzel-Servers einmalig übernehmen
+    OLD_PM=/var/lib/proxie-maker/proxies.db
+    NEW_PM=/var/lib/mtg-cards/proxies.db
+    if [ -f "$OLD_PM" ] && [ ! -f "$NEW_PM" ]; then
+        python3 -c "import sqlite3,sys;s=sqlite3.connect(sys.argv[1]);d=sqlite3.connect(sys.argv[2]);s.backup(d);d.close()" \
+            "$OLD_PM" "$NEW_PM" && chown mtgcards:mtgcards "$NEW_PM" && chmod 0640 "$NEW_PM" \
+            && echo "  Proxie-Maker-Daten übernommen ($OLD_PM -> $NEW_PM)."
+    fi
+    if [ -d /run/systemd/system ] && systemctl is-enabled proxie-maker-server.service >/dev/null 2>&1; then
+        systemctl disable --now proxie-maker-server.service >/dev/null 2>&1 || true
+        echo "  Der frühere Dienst proxie-maker-server wurde beendet (jetzt Teil von MTG Cards)."
+        echo "  Paket entfernen (Daten bleiben erhalten):  sudo apt remove proxie-maker-server"
+    fi
+
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload >/dev/null 2>&1 || true
         systemctl enable mtg-cards-server.service >/dev/null 2>&1 || true
@@ -26,7 +40,7 @@ if [ "$1" = "configure" ]; then
     echo "  MTG Cards Server installiert und gestartet (Port 8765)."
     echo "  Zugangs-Token für App und Desktop:  $TOKEN"
     echo "  Token später anzeigen:  sudo mtg-cards-server --show-token"
-    echo "  Weboberfläche:          http://<server-ip>:8765"
+    echo "  Weboberfläche:          http://<server-ip>:8765   (Proxie Maker: http://<server-ip>:8765/proxies/)"
     echo ""
 fi
 exit 0

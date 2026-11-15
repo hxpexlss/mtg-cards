@@ -203,6 +203,23 @@ def run_gtk_window(url, local_prefix):
     return True
 
 
+def migrate_proxie_maker(db_path):
+    """Einmalig: Daten der früheren eigenständigen Proxie-Maker-Desktop-App übernehmen."""
+    import sqlite3
+    target = os.path.join(os.path.dirname(os.path.abspath(db_path)), "proxies.db")
+    old = os.path.join(os.path.dirname(config.DESKTOP_DATA_DIR), "proxie-maker", "proxies.db")
+    if os.path.exists(target) or not os.path.exists(old):
+        return
+    try:
+        src, dst = sqlite3.connect(old), sqlite3.connect(target)
+        src.backup(dst)
+        dst.close()
+        src.close()
+        print(f"[desktop] Proxie-Maker-Daten übernommen aus {old}")
+    except sqlite3.Error as e:
+        print(f"[desktop] Proxie-Maker-Daten konnten nicht übernommen werden: {e}", file=sys.stderr)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="mtg-cards", description="MTG Cards Desktop")
     p.add_argument("--config", default=config.DESKTOP_CONFIG_PATH)
@@ -246,6 +263,7 @@ def main(argv=None):
         ui_port = running
     else:
         settings = DesktopSettings(args.config, cfg)
+        migrate_proxie_maker(cfg["db_path"])
         use_tls = bool(cfg.get("tls"))
         if use_tls:
             try:
@@ -278,7 +296,8 @@ def main(argv=None):
             print(f"[desktop] Zertifikats-Fingerabdruck: {server.ctx.tls_fingerprint}")
 
     local_prefix = f"http://127.0.0.1:{ui_port}"
-    url = f"{local_prefix}/#token={cfg['token']}"
+    # Startmenü: MTG Cards oder Proxie Maker
+    url = f"{local_prefix}/start.html#token={cfg['token']}"
 
     try:
         if args.server_only:

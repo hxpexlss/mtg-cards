@@ -50,6 +50,7 @@ class AppContext:
         self.kind = kind            # "server" oder "desktop"
         self.port = port
         self.desktop = desktop      # DesktopSettings-Objekt (nur Desktop)
+        self.pm = None              # Proxie Maker (mtgcards.pm.routes.PMContext)
         self.tls_fingerprint = None
         # Schutz vor doppeltem Speichern: Antworten auf Anfragen mit request_id werden gemerkt. Wiederholt die
         # App eine Anfrage (Timeout, Funkloch, Warteschlange), bekommt sie die alte Antwort statt neuer Karten.
@@ -199,6 +200,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path.rstrip("/") or "/"
         qs = parse_qs(url.query)
         try:
+            if path == "/proxies" or path.startswith("/proxies/"):
+                return self.proxie_maker(method, url, path[len("/proxies"):] or "/", qs)
             if not path.startswith("/api/"):
                 if method != "GET":
                     raise ApiError(405, "Methode nicht erlaubt")
@@ -233,13 +236,36 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    # -- Proxie Maker (unter /proxies/) ------------------------------------------------
+    def proxie_maker(self, method, url, sub, qs):
+        if not sub.startswith("/api/"):
+            if method != "GET":
+                raise ApiError(405, "Methode nicht erlaubt")
+            if url.path == "/proxies":            # relative Pfade (style.css …) brauchen den Schrägstrich
+                self.send_response(301)
+                self.send_header("Location", "/proxies/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            return self.serve_static(sub, os.path.join(WEB_DIR, "proxies"))
+        self.check_auth(qs)
+        remote = self.ctx.remote()
+        if remote:
+            return self.proxy(remote, method, url)
+        if self.ctx.pm is None:
+            raise ApiError(404, "Proxie Maker ist auf diesem Server nicht aktiv")
+        from .pm import routes as pm_routes
+        if not pm_routes.dispatch(self, self.ctx.pm, method, sub, qs):
+            raise ApiError(404, "Unbekannter Endpunkt")
+        return None
+
     # -- Statische Dateien ----------------------------------------------------
-    def serve_static(self, path):
+    def serve_static(self, path, root=WEB_DIR):
         if path == "/":
             path = "/index.html"
-        full = os.path.normpath(os.path.join(WEB_DIR, path.lstrip("/")))
-        if not full.startswith(WEB_DIR + os.sep) or not os.path.isfile(full):
-            full = os.path.join(WEB_DIR, "index.html")
+        full = os.path.normpath(os.path.join(root, path.lstrip("/")))
+        if not full.startswith(root + os.sep) or not os.path.isfile(full):
+            full = os.path.join(root, "index.html")
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype in ("application/javascript", "image/svg+xml"):
             ctype += "; charset=utf-8"
@@ -1152,12 +1178,20 @@ class Server:
 
     def __init__(self, db_path, token, bind="0.0.0.0", port=8765, kind="server",
                  discovery=True, desktop=None, scryfall=None, tls_cert=None, tls_key=None,
-                 local_http=False, auto_refresh_hours=0):
+                 local_http=False, auto_refresh_hours=0, proxies_db=None):
         self.db = Database(db_path)
         if scryfall is None:
             scryfall = Scryfall(cache_path=cache_path_for(db_path))
         self.ctx = AppContext(self.db, scryfall, token, kind=kind,
                               port=port, desktop=desktop)
+        # Proxie Maker: eigene Datenbank neben der Sammlung (Standard: proxies.db im gleichen Ordner)
+        if proxies_db is None and db_path != ":memory:":
+            proxies_db = os.path.join(os.path.dirname(os.path.abspath(db_path)), "proxies.db")
+        if proxies_db:
+            from .pm.routes import PMContext
+            cache = None if proxies_db == ":memory:" else os.path.join(
+                os.path.dirname(os.path.abspath(proxies_db)), "bilder-cache")
+            self.ctx.pm = PMContext(proxies_db, scryfall, cache, mtg=self.ctx, kind=kind)
         handler = type("BoundHandler", (Handler,), {"ctx": self.ctx})
         self.httpd = QuietHTTPServer((bind, port), handler)
         self.servers = [self.httpd]
@@ -1191,6 +1225,9 @@ class Server:
                         age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600
                     if age is None or age >= self.auto_refresh_hours:
                         res = refresh_all(self.ctx)
+                        if self.ctx.pm is not None:
+                            from .pm.routes import refresh_prices as pm_refresh
+                            pm_refresh(self.ctx.pm)
                         print(f"[preise] {res['updated']} Karten aktualisiert", flush=True)
             except Exception as e:  # noqa: BLE001 – offline o.ä.: später erneut versuchen
                 print(f"[preise] Aktualisierung fehlgeschlagen: {e}", flush=True)
@@ -1237,3 +1274,5 @@ class Server:
         if self.discovery:
             self.discovery.stop()
         self.db.close()
+        if self.ctx.pm is not None:
+            self.ctx.pm.close()

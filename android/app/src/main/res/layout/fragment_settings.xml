@@ -23,6 +23,14 @@
             android:text="Verbinde die App mit der Desktop-Anwendung auf deinem Linux-PC oder mit dem Headless-Server. Die Adresse und den Token findest du am PC unter ⚙ Einstellungen bzw. auf dem Server mit „sudo mtg-cards-server --show-token“." />
 
         <Button
+            android:id="@+id/btnStartMenu"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="⌂ Startmenü (MTG Cards / Proxie Maker)" />
+
+        <Button
             android:id="@+id/btnDiscover"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="match_parent"

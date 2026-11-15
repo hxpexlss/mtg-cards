@@ -203,8 +203,11 @@ def _text_ops(x, y, size, text, font="F1"):
     return f"BT /{font} {size:.1f} Tf {x:.2f} {y:.2f} Td ({_pdf_text(text)}) Tj ET\n"
 
 
-def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards Proxies"):
-    """Erzeugt die PDF (Bytes). entries aus collect_entries()."""
+def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards Proxies", duplex=False):
+    """Erzeugt die PDF (Bytes). entries: {"image": JPEG-Bytes|None, "text": {...}, "back": JPEG-Bytes|None}.
+
+    duplex=True: nach jeder Vorderseite eine Seite mit den Rückseiten, gespiegelt für beidseitigen Druck
+    über die lange Kante – Vorder- und Rückseite liegen dann genau übereinander."""
     pw, ph = PAPERS.get(paper, PAPERS["a4"])
     cols, rows = 3, 3
     gap = max(0.0, min(float(gap_mm or 0), 5.0))
@@ -222,8 +225,7 @@ def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards 
     font_b = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 
     images = {}   # gleiche Bilder nur einmal einbetten
-    for e in entries:
-        img = e.get("image")
+    for img in [e.get("image") for e in entries] + ([e.get("back") for e in entries] if duplex else []):
         if img is None:
             continue
         key = hashlib.sha1(img).hexdigest()
@@ -255,11 +257,29 @@ def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards 
                 ops.append(_text_card_ops(e.get("text") or {"name": e.get("name", "")}, x, y, w, h))
         if cut_marks:
             ops.append(_cut_marks(left, bottom, cols, rows, gap, pw, ph))
-        footer = f"{title} - nur zum Testen, nicht zum Verkauf - Seite {p + 1}/{pages_n} - mit 100 % (tatsächliche Größe) drucken"
+        footer = f"{title} - Proxies nur für den Eigengebrauch, nicht zum Verkauf - Seite {p + 1}/{pages_n} - mit 100 % (tatsächliche Größe) drucken"
         ops.append("0.45 g\n" + _text_ops(left * MM, max(4, bottom - 9) * MM, 7, footer) + "0 g\n")
         content = pdf.stream("", "".join(ops).encode("latin-1"))
         page_nums.append(pdf.add(f"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 {pw * MM:.2f} {ph * MM:.2f}]"
                                  f" /Resources {resources} /Contents {content} 0 R >>"))
+        if duplex:
+            # Rückseiten: Spalten gespiegelt (Wenden über die lange Kante)
+            bops = []
+            for i, e in enumerate(chunk):
+                img = e.get("back")
+                if img is None:
+                    continue
+                c, r = cols - 1 - i % cols, i // cols
+                x = (left + c * (CARD_W + gap)) * MM
+                y = (bottom + (rows - 1 - r) * (CARD_H + gap)) * MM
+                name = images[hashlib.sha1(img).hexdigest()][0]
+                bops.append(f"q {CARD_W * MM:.3f} 0 0 {CARD_H * MM:.3f} {x:.3f} {y:.3f} cm /{name} Do Q\n")
+            bops.append("0.45 g\n" + _text_ops(left * MM, max(4, bottom - 9) * MM, 7,
+                                                f"Rückseiten zu Seite {p + 1} - beidseitig drucken, Wenden an der langen Kante")
+                        + "0 g\n")
+            bcontent = pdf.stream("", "".join(bops).encode("latin-1"))
+            page_nums.append(pdf.add(f"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 {pw * MM:.2f} {ph * MM:.2f}]"
+                                     f" /Resources {resources} /Contents {bcontent} 0 R >>"))
     pdf.set(pages, f"<< /Type /Pages /Kids [{' '.join(f'{n} 0 R' for n in page_nums)}] /Count {len(page_nums)} >>")
     pdf.set(catalog, f"<< /Type /Catalog /Pages {pages} 0 R >>")
     pdf.add(f"<< /Title ({_pdf_text(title)}) /Producer (MTG Cards {__version__}) >>")

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Cards – Start</title>
+<link rel="icon" href="icon.svg">
+<style>
+  :root { --bg: #12111a; --panel: #22202f; --line: #34314a; --text: #ece9f7; --muted: #9a95b3; color-scheme: dark; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f4f2f8; --panel: #fff; --line: #ddd9e8; --text: #1d1a29; --muted: #6c6782; color-scheme: light; } }
+  body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 26px; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 20px; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 26px; }
+  .tiles { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+  a.tile { width: 280px; padding: 26px 22px; border-radius: 18px; background: var(--panel); border: 2px solid var(--line);
+    color: inherit; text-decoration: none; display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center;
+    transition: transform .12s, border-color .12s; }
+  a.tile:hover, a.tile:focus { transform: translateY(-3px); border-color: var(--c); outline: none; }
+  a.tile img { width: 76px; height: 76px; }
+  a.tile b { font-size: 20px; }
+  a.tile span { color: var(--muted); font-size: 13px; }
+  label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+  <h1>Was möchtest du öffnen?</h1>
+  <div class="tiles">
+    <a class="tile" id="t-mtg" href="/" style="--c:#8b6cff"><img src="icon.svg" alt=""><b>MTG Cards</b>
+      <span>Sammlung, Decks, Sets, Wunschliste, Statistik</span></a>
+    <a class="tile" id="t-pm" href="/proxies/" style="--c:#e2a03f"><img src="proxies/icon.svg" alt=""><b>Proxie Maker</b>
+      <span>Proxies personalisieren und drucken</span></a>
+  </div>
+  <label><input type="checkbox" id="remember"> Auswahl merken und beim nächsten Start direkt öffnen</label>
+<script>
+  "use strict";
+  const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (_) { /* privat */ } return null; };
+  const m = location.hash.match(/token=([^&]+)/);
+  const token = m ? decodeURIComponent(m[1]) : (ls("mtg-token") || "");
+  if (m) { ls("mtg-token", token); ls("pm-token", token); }
+  const hash = token ? "#token=" + encodeURIComponent(token) : "";
+  document.getElementById("t-mtg").href = "/" + hash;
+  document.getElementById("t-pm").href = "/proxies/" + hash;
+  const remembered = ls("start-choice");
+  if (remembered && !location.search.includes("menu")) location.replace((remembered === "pm" ? "/proxies/" : "/") + hash);
+  document.getElementById("remember").checked = !!remembered;
+  document.getElementById("remember").onchange = (e) => { if (!e.target.checked) ls("start-choice", ""); };
+  for (const [id, v] of [["t-mtg", "mtg"], ["t-pm", "pm"]]) {
+    document.getElementById(id).addEventListener("click", () => { if (document.getElementById("remember").checked) ls("start-choice", v); });
+  }
+</script>
+</body>
+</html>

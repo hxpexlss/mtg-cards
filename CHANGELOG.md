@@ -4,6 +4,30 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.0.0] – 2026-11-15
+
+**MTG Cards und Proxie Maker in einer Anwendung.** Die Version 2.x bleibt im Branch
+`claude/magic-cards-scanner-app-q6kz58` und unter den Releases v2.x erhalten; Proxie Maker gibt es weiterhin
+eigenständig im Repo `proxie-maker`.
+
+### Neu
+- **Ein Server für beides:** `mtg-cards-server` liefert MTG Cards (`http://server:8765/`) und Proxie Maker
+  (`http://server:8765/proxies/`) auf **einem Port** mit **einem Token** aus. Proxie Maker speichert in einer eigenen
+  Datei (`proxies.db`) neben der Sammlung.
+- **Android-App mit Startmenü:** Beim Öffnen „MTG Cards“ oder „Proxie Maker“ wählen (auf Wunsch merken).
+  Eine gemeinsame Verbindung; zurück ins Startmenü über ⌂ (Proxie Maker) bzw. „Verbindung → Startmenü“ (MTG Cards).
+- **Linux-Desktop mit Startmenü:** gleiche Auswahl beim Start; Wechsel jederzeit über „🖨 Proxie Maker“ bzw. „← MTG Cards“.
+  Im Browser: `http://server:8765/start.html`.
+- **Proxie Maker kennt deine Sammlung direkt:** „Aus MTG Cards“ und „Neues Deck → Deck aus MTG Cards“ funktionieren
+  ohne Adresse und Token.
+- Sicherung von Proxie Maker auf dem Server: `sudo mtg-cards-server --export-proxies DATEI.json`.
+
+### Umstieg vom eigenständigen Proxie Maker
+- Server: Beim Update werden die Daten aus `/var/lib/proxie-maker/proxies.db` einmalig übernommen und der alte Dienst
+  `proxie-maker-server` beendet. Danach kann das alte Paket entfernt werden: `sudo apt remove proxie-maker-server`.
+- Desktop: Daten der früheren Proxie-Maker-Desktop-App werden beim ersten Start übernommen.
+- Android: Die getrennte Proxie-Maker-App wird nicht mehr gebraucht und kann deinstalliert werden.
+
 ## [2.1.1] – 2026-11-13
 
 ### Behoben

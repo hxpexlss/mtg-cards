@@ -37,7 +37,7 @@ cd android && ./gradlew assembleRelease   # -> app/build/outputs/apk/release/app
 ### Linux-Desktop (Ubuntu/Debian/Mint …)
 
 ```sh
-sudo apt install ./mtg-cards-desktop_2.1.1_all.deb
+sudo apt install ./mtg-cards-desktop_3.0.0_all.deb
 ```
 
 Startet über das Anwendungsmenü („MTG Cards“) oder `mtg-cards`. Unter **⚙ Einstellungen** stehen die Adressen und der
@@ -52,7 +52,7 @@ Weitere Optionen: `mtg-cards --help` (`--browser`, `--server-only`, `--remote UR
 ### Ubuntu-Server (headless)
 
 ```sh
-sudo apt install ./mtg-cards-server_2.1.1_all.deb
+sudo apt install ./mtg-cards-server_3.0.0_all.deb
 sudo mtg-cards-server --show-token        # Token für App und Desktop
 ```
 
@@ -309,3 +309,13 @@ Header `Authorization: Bearer <TOKEN>`.
 
 Hinweis zur App-Signatur: Die APK wird mit einem im Repository liegenden, nicht geheimen Schlüssel
 (`android/app/mtgcards-debug.keystore`) signiert, damit Updates aus jedem Build ohne Neuinstallation funktionieren.
+
+## Proxie Maker (ab Version 3)
+
+Proxie Maker ist Teil von MTG Cards: Proxies personalisieren (eigenes Artwork, Farben, Rand, Sammlernummer/Copyright
+entfernen, Texte) und drucken – nur für den Eigengebrauch. Drucklisten (wie die Wunschliste) und Decks (komplette
+Deckliste, nach Typen sortiert).
+
+- Browser: `http://<server>:8765/proxies/` – oder `http://<server>:8765/start.html` für die Auswahl
+- Android-App und Linux-Desktop: Startmenü beim Öffnen („MTG Cards“ oder „Proxie Maker“)
+- Daten: `proxies.db` neben `cards.db`; Sicherung: `sudo mtg-cards-server --export-proxies proxies.json`

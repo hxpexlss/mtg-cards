@@ -41,6 +41,10 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         }
         view.findViewById<Button>(R.id.btnSave).setOnClickListener { saveAndTest() }
         view.findViewById<Button>(R.id.btnDiscover).setOnClickListener { discover() }
+        view.findViewById<Button>(R.id.btnStartMenu).setOnClickListener {
+            StartActivity.open(requireContext())
+            requireActivity().finish()
+        }
     }
 
     private fun saveAndTest(fingerprint: String? = null) {
