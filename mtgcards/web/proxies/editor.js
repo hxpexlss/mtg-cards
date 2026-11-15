@@ -15,7 +15,7 @@ const DEFAULTS = {
   artFx: { brightness: 0, contrast: 0, saturation: 0, hue: 0 },
   frameFx: { target: "frame", hue: 0, saturation: 0, brightness: 0, contrast: 0, grayscale: false, tint: "#e2a03f", tintAmount: 0 },
   border: { mode: "keep", color: "#000000", width: 0.045 },
-  footer: { mode: "keep", text: "Proxy", top: 0.938, bottom: 0.985 },
+  footer: { mode: "keep", text: "Proxy", top: 0.938, bottom: 0.985, spare: true, rightTop: 0.952, gap: 0.06 },
   corners: "border",
   texts: [],
 };
@@ -156,16 +156,27 @@ function renderCard(canvas, s, images, opts = {}) {
 
   // 5. Unterer Rand: Sammlernummer, Edition, Künstler, Copyright
   if (s.footer.mode !== "keep") {
-    const top = s.footer.top * H, bottom = s.footer.bottom * H;
-    const fill = s.border.mode === "color" ? s.border.color : sampleColor(ctx, Math.min(H - 3, bottom + 3));
+    const f = s.footer;
+    const top = f.top * H, bottom = f.bottom * H;
+    const fill = s.border.mode === "color" ? s.border.color : sampleColor(ctx, Math.min(H - 3, bottom + 3), 0.08, 0.4);
     ctx.fillStyle = fill;
-    ctx.fillRect(W * 0.03, top, W * 0.94, bottom - top);
-    if (s.footer.mode === "text" && s.footer.text) {
+    if (f.spare !== false) {
+      // Moderne Rahmen: Nummer/Edition links, Copyright rechts (tiefer). Holo-Stempel in der Mitte und das
+      // Stärke-Feld rechts bleiben stehen.
+      const gap = (f.gap ?? 0.06) * W;
+      const rTop = Math.max(top, (f.rightTop ?? 0.952) * H);
+      ctx.fillRect(W * 0.03, top, W / 2 - gap - W * 0.03, bottom - top);
+      ctx.fillRect(W / 2 + gap, rTop, W * 0.97 - W / 2 - gap, bottom - rTop);
+    } else {
+      ctx.fillRect(W * 0.03, top, W * 0.94, bottom - top);
+    }
+    if (f.mode === "text" && f.text) {
+      const h = Math.min(bottom - top, (bottom - (f.spare !== false ? Math.max(top, (f.rightTop ?? 0.952) * H) : top)) * 1.4);
       ctx.fillStyle = contrastText(fill);
-      ctx.font = `${Math.max(9, (bottom - top) * 0.5)}px "Segoe UI", system-ui, sans-serif`;
-      ctx.textAlign = "center";
+      ctx.font = `${Math.max(9, h * 0.55)}px "Segoe UI", system-ui, sans-serif`;
+      ctx.textAlign = f.spare !== false ? "left" : "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(s.footer.text, W / 2, (top + bottom) / 2);
+      ctx.fillText(f.text, f.spare !== false ? W * 0.06 : W / 2, (top + bottom) / 2);
     }
   }
 
@@ -253,8 +264,12 @@ async function openEditor(item) {
           <label>Inhalt <select data-k="footer.mode"><option value="keep">wie Original</option>
             <option value="remove">entfernen</option><option value="text">durch eigenen Text ersetzen</option></select></label>
           <label>Text <input data-k="footer.text" placeholder="z.B. Proxy"></label>
-          <div class="two"><label>Bereich oben <input type="range" min="0.88" max="0.99" step="0.001" data-k="footer.top"></label>
-            <label>Bereich unten <input type="range" min="0.9" max="1" step="0.001" data-k="footer.bottom"></label></div>
+          <label class="check"><input type="checkbox" data-k="footer.spare"> Holo-Stempel (Mitte) und Stärke-Feld aussparen</label>
+          <div class="two"><label>Bereich oben (links) <input type="range" min="0.88" max="0.99" step="0.001" data-k="footer.top"></label>
+            <label>Bereich unten <input type="range" min="0.9" max="1" step="0.001" data-k="footer.bottom"></label>
+            <label>Bereich oben (rechts) <input type="range" min="0.9" max="0.99" step="0.001" data-k="footer.rightTop"></label>
+            <label>Lücke in der Mitte <input type="range" min="0" max="0.2" step="0.002" data-k="footer.gap"></label></div>
+          <p class="muted small">Bei alten Karten (Künstler/Copyright mittig) „aussparen“ ausschalten.</p>
           <p class="muted small">Nur für eigene Proxies (Playtest, eigene Decks) – nicht zum Verkauf oder Tausch.</p>
         </div></details>
         <details class="sec"><summary>🔤 Eigene Texte</summary><div>

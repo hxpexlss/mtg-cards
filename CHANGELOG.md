@@ -4,6 +4,14 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.1.1] – 2026-11-15
+
+### Behoben
+- **Proxie Maker – unterer Rand:** Beim Entfernen/Ersetzen von Sammlernummer und Copyright wurden auch der
+  Holo-Stempel in der Mitte und der untere Rand des Stärke-Felds übermalt. Jetzt werden nur die Textbereiche links
+  (Nummer, Edition, Künstler) und rechts (Copyright, etwas tiefer) entfernt. Feineinstellung über „Bereich oben
+  (links/rechts)“ und „Lücke in der Mitte“; für alte Karten mit mittigem Text „aussparen“ ausschalten.
+
 ## [3.1.0] – 2026-11-15
 
 ### Neu
