@@ -31,8 +31,6 @@ jobs:
           TOKEN=$(sudo mtg-cards-server --show-token)
           curl -sf http://127.0.0.1:8765/api/health
           curl -sf -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/api/stats
-          curl -sf http://127.0.0.1:8765/proxies/ | grep -q "Proxie Maker"
-          curl -sf -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/proxies/api/projects
           echo "--- HTTPS"
           sudo mtg-cards-server --enable-tls
           sudo systemctl restart mtg-cards-server
@@ -67,14 +65,73 @@ jobs:
           name: android-apk
           path: mtg-cards-scanner.apk
 
+  windows:
+    name: Windows (Desktop)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: python -m pip install --upgrade pip pyinstaller cryptography
+      - name: Tests unter Windows
+        run: python -W ignore -m unittest discover -s tests -v
+      - name: Version ermitteln
+        id: ver
+        shell: bash
+        run: echo "version=$(python -c "import re;print(re.search(r'__version__ = \"(.+?)\"', open('mtgcards/__init__.py').read()).group(1))")" >> "$GITHUB_OUTPUT"
+      - name: Programme bauen (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --clean --distpath dist/windows --workpath build/pyi --name mtg-cards-desktop --windowed --icon packaging/windows/mtg-cards.ico --add-data "mtgcards/web;mtgcards/web" --hidden-import mtgcards.pm.routes --hidden-import mtgcards.pm.store --hidden-import mtgcards.pm.printing --paths . packaging/windows/desktop_entry.py
+      - name: Funktionstest Desktop-Programm (ohne Fenster)
+        shell: pwsh
+        run: |
+          $tmp = $env:RUNNER_TEMP
+          $dcfg = Join-Path $tmp "desktop.json"
+          $exe = "dist\windows\mtg-cards-desktop\mtg-cards-desktop.exe"
+          $d = Start-Process -FilePath $exe -ArgumentList "--config `"$dcfg`" --port 8798 --server-only" -PassThru
+          Start-Sleep -Seconds 8
+          $dh = Invoke-RestMethod http://127.0.0.1:8798/api/health
+          if ($dh.kind -ne "desktop") { throw "Desktop-Server antwortet nicht" }
+          if ($dh.version -ne "${{ steps.ver.outputs.version }}") { throw "Falsche Version: $($dh.version)" }
+          $token = (Get-Content $dcfg | ConvertFrom-Json).token
+          $h = @{ Authorization = "Bearer $token" }
+          $stats = Invoke-RestMethod http://127.0.0.1:8798/api/stats -Headers $h
+          $start = Invoke-WebRequest http://127.0.0.1:8798/start.html -UseBasicParsing
+          if ($start.Content -notmatch "Proxie Maker") { throw "Startmenü fehlt" }
+          $pm = Invoke-WebRequest http://127.0.0.1:8798/proxies/ -UseBasicParsing
+          if ($pm.Content -notmatch "Proxie Maker") { throw "Proxie-Maker-Oberfläche fehlt" }
+          $proj = Invoke-RestMethod http://127.0.0.1:8798/proxies/api/projects -Method Post -Headers $h -ContentType "application/json" -Body '{"name":"Test"}'
+          $list = Invoke-RestMethod http://127.0.0.1:8798/proxies/api/projects -Headers $h
+          if ($list.projects.Count -lt 1) { throw "Proxie Maker speichert nicht" }
+          Write-Output "Desktop OK: $($dh.version), $($stats.cards) Karten, Proxie Maker OK"
+          Stop-Process -Id $d.Id -Force
+      - name: Installer bauen (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress | Out-Null
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc /DAppVersion=${{ steps.ver.outputs.version }} packaging\windows\mtg-cards.iss
+          Compress-Archive -Path dist\windows\mtg-cards-desktop -DestinationPath "dist\MTG-Cards-Windows-portable-${{ steps.ver.outputs.version }}.zip"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/MTG-Cards-Setup-*.exe
+            dist/MTG-Cards-Windows-portable-*.zip
+
   release:
     name: GitHub-Release
     # Release bei Versions-Tags, manuellem Start oder Push auf den Entwicklungs-Branch
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && (github.ref_name == 'claude/magic-cards-scanner-app-q6kz58' || github.ref_name == 'claude/v3-mtg-cards-proxie-maker'))
-    needs: [python, android]
+      (github.event_name == 'push' && github.ref_name == 'claude/v3-windows')
+    needs: [python, android, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,18 +142,29 @@ jobs:
         with:
           path: out
           merge-multiple: true
-      - name: Release-Notes aus CHANGELOG.md
-        run: python3 .github/scripts/release_notes.py --version ${{ steps.ver.outputs.version }} --out release-notes.md
+      - name: Release-Notes
+        shell: bash
+        run: |
+          if [ "${{ github.ref_name }}" = "claude/v3-windows" ]; then
+            # Windows-Vorschau: eigenes Release nur mit den Windows-Dateien
+            cp packaging/windows/RELEASE_NOTES.md release-notes.md
+            find out -type f ! -name 'MTG-Cards-*' -delete
+          else
+            python3 .github/scripts/release_notes.py --version ${{ steps.ver.outputs.version }} --out release-notes.md
+          fi
+          ls -la out
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
-          name: MTG Cards ${{ steps.ver.outputs.version }}
+          tag_name: v${{ steps.ver.outputs.version }}${{ github.ref_name == 'claude/v3-windows' && '-windows' || '' }}
+          name: MTG Cards ${{ steps.ver.outputs.version }}${{ github.ref_name == 'claude/v3-windows' && ' (Windows-Vorschau)' || '' }}
           target_commitish: ${{ github.sha }}
-          make_latest: true
+          make_latest: ${{ github.ref_name == 'claude/v3-windows' && 'false' || 'true' }}
+          prerelease: ${{ github.ref_name == 'claude/v3-windows' }}
           overwrite_files: true
           body_path: release-notes.md
           files: out/*
       - name: Release-Notes aller Versionen aktualisieren
+        if: github.ref_name != 'claude/v3-windows'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release_notes.py --sync

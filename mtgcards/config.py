@@ -19,9 +19,25 @@ def _xdg(var, fallback):
     return os.environ.get(var) or os.path.expanduser(fallback)
 
 
-DESKTOP_CONFIG_PATH = os.path.join(_xdg("XDG_CONFIG_HOME", "~/.config"), "mtg-cards", "config.json")
-DESKTOP_DATA_DIR = os.path.join(_xdg("XDG_DATA_HOME", "~/.local/share"), "mtg-cards")
-SERVER_CONFIG_PATH = "/etc/mtg-cards/server.json"
+IS_WINDOWS = os.name == "nt"
+
+if IS_WINDOWS:
+    # %APPDATA%\mtg-cards (Einstellungen), %LOCALAPPDATA%\mtg-cards (Daten), %ProgramData%\mtg-cards (Server)
+    _appdata = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+    _localdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+    _programdata = os.environ.get("PROGRAMDATA") or "C:\\ProgramData"
+    DESKTOP_CONFIG_PATH = os.path.join(_appdata, "mtg-cards", "config.json")
+    DESKTOP_DATA_DIR = os.path.join(_localdata, "mtg-cards")
+    SERVER_DIR = os.path.join(_programdata, "mtg-cards")
+    SERVER_CONFIG_PATH = os.path.join(SERVER_DIR, "server.json")
+    SERVER_DB_PATH = os.path.join(SERVER_DIR, "cards.db")
+    SERVER_TLS_DIR = os.path.join(SERVER_DIR, "tls")
+else:
+    DESKTOP_CONFIG_PATH = os.path.join(_xdg("XDG_CONFIG_HOME", "~/.config"), "mtg-cards", "config.json")
+    DESKTOP_DATA_DIR = os.path.join(_xdg("XDG_DATA_HOME", "~/.local/share"), "mtg-cards")
+    SERVER_CONFIG_PATH = "/etc/mtg-cards/server.json"
+    SERVER_DB_PATH = "/var/lib/mtg-cards/cards.db"
+    SERVER_TLS_DIR = "/etc/mtg-cards/tls"
 
 DESKTOP_DEFAULTS = {
     "mode": "local",            # "local" = eigene Datenbank, "remote" = mit Server verbinden
@@ -43,12 +59,12 @@ SERVER_DEFAULTS = {
     "bind": "0.0.0.0",
     "port": DEFAULT_PORT,
     "token": None,
-    "db_path": "/var/lib/mtg-cards/cards.db",
+    "db_path": SERVER_DB_PATH,
     "discovery": True,
     "auto_refresh_hours": 24,
     "tls": False,
-    "tls_cert": "/etc/mtg-cards/tls/cert.pem",
-    "tls_key": "/etc/mtg-cards/tls/key.pem",
+    "tls_cert": os.path.join(SERVER_TLS_DIR, "cert.pem"),
+    "tls_key": os.path.join(SERVER_TLS_DIR, "key.pem"),
 }
 
 
@@ -81,7 +97,8 @@ def save(path, cfg):
     if old:
         try:
             os.chmod(tmp, old.st_mode & 0o777)
-            os.chown(tmp, old.st_uid, old.st_gid)
+            if hasattr(os, "chown"):        # nicht unter Windows
+                os.chown(tmp, old.st_uid, old.st_gid)
         except OSError:
             pass
     os.replace(tmp, path)

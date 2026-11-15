@@ -13,7 +13,8 @@ import sys
 import threading
 import time
 import webbrowser
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from . import APP_NAME, __version__, config, tls
 from .netinfo import local_addresses, tailscale_dns_name
@@ -116,10 +117,39 @@ def _already_running():
 
 
 def _open_external(uri):
+    if os.name == "nt":
+        webbrowser.open(uri)
+        return
     try:
         subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         webbrowser.open(uri)
+
+
+def _find_edge():
+    """Pfad zu Microsoft Edge (auf Windows 10/11 vorinstalliert)."""
+    import shutil
+    candidates = [shutil.which("msedge")]
+    for base in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            candidates.append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+    return next((c for c in candidates if c and os.path.exists(c)), None)
+
+
+def run_windows_window(url):
+    """Windows: eigenes Fenster über Edge im App-Modus (ohne Adressleiste). Blockiert, bis es geschlossen wird.
+
+    Gibt False zurück, wenn Edge nicht gefunden wurde.
+    """
+    edge = _find_edge()
+    if not edge:
+        return False
+    profile = os.path.join(config.DESKTOP_DATA_DIR, "window")
+    os.makedirs(profile, exist_ok=True)
+    proc = subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run",
+                             "--window-size=1320,880", "--disable-features=Translate"])
+    proc.wait()   # eigenes Profil -> eigener Prozess, endet mit dem Fenster
+    return True
 
 
 def run_gtk_window(url, local_prefix):
@@ -220,6 +250,53 @@ def migrate_proxie_maker(db_path):
         print(f"[desktop] Proxie-Maker-Daten konnten nicht übernommen werden: {e}", file=sys.stderr)
 
 
+def _fatal(message):
+    """Fehler anzeigen – unter Windows als Meldungsfenster (die Desktop-.exe hat keine Konsole)."""
+    print(f"Fehler: {message}", file=sys.stderr)
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, "MTG Cards", 0x10)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _local_server_login(port):
+    """(url, token, fingerabdruck) eines MTG-Cards-Servers auf diesem Rechner, falls dessen Konfiguration
+    lesbar ist. Der Fingerabdruck ist nur gesetzt, wenn der Server HTTPS verwendet."""
+    try:
+        with open(config.SERVER_CONFIG_PATH, encoding="utf-8") as f:
+            scfg = json.load(f)
+        token = scfg.get("token")
+        if not token:
+            return None
+        attempts = [(f"http://127.0.0.1:{port}", "")]
+        if scfg.get("tls"):
+            cert = scfg.get("tls_cert") or config.SERVER_DEFAULTS["tls_cert"]
+            attempts.insert(0, (f"https://127.0.0.1:{port}", tls.fingerprint_file(cert)))
+        for url, fp in attempts:
+            try:
+                with tls.urlopen(Request(url + "/api/health"), timeout=2, fingerprint=fp or None) as r:
+                    health = json.loads(r.read().decode())
+            except Exception:  # noqa: BLE001 – nächste Variante probieren
+                continue
+            if health.get("app") == APP_NAME and health.get("kind") == "server":
+                return url, token, fp
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _points_to_self(url, port):
+    """Zeigt die Server-Adresse auf diese Anwendung selbst (127.0.0.1/localhost + eigener Port)?"""
+    try:
+        u = urlparse(url if "://" in (url or "") else "http://" + (url or ""))
+        default = 443 if u.scheme == "https" else 80
+        return (u.hostname or "").lower() in ("127.0.0.1", "localhost", "::1") and (u.port or default) == port
+    except ValueError:
+        return False
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="mtg-cards", description="MTG Cards Desktop")
     p.add_argument("--config", default=config.DESKTOP_CONFIG_PATH)
@@ -278,9 +355,25 @@ def main(argv=None):
                             tls_key=cfg["tls_key"] if use_tls else None, local_http=use_tls,
                             auto_refresh_hours=float(cfg.get("auto_refresh_hours", 24)))
         except OSError as e:
-            print(f"[desktop] Port {port} belegt ({e}). Läuft bereits ein MTG-Cards-Server? "
-                  f"Anderen Port mit --port wählen.", file=sys.stderr)
-            return 1
+            # Port belegt: Läuft auf diesem Rechner der MTG-Cards-Server (z.B. Desktop + Server installiert)?
+            # Dann automatisch mit ihm verbinden und die Oberfläche auf einem freien lokalen Port anbieten.
+            local = _local_server_login(port)
+            if not local:
+                _fatal(f"Port {port} ist belegt ({e}).\n\nLäuft bereits ein anderes Programm auf diesem Port? "
+                       f"Anderen Port mit --port wählen.")
+                return 1
+            cfg.update(mode="remote", remote_url=local[0], remote_token=local[1], remote_fingerprint=local[2])
+            config.save(args.config, cfg)
+            server = Server(cfg["db_path"], cfg["token"], bind="127.0.0.1", port=0, kind="desktop",
+                            discovery=False, desktop=settings)
+            print(f"[desktop] Lokaler MTG-Cards-Server erkannt – verbunden mit {local[0]}")
+        if cfg.get("mode") == "remote" and _points_to_self(cfg.get("remote_url"), server.port):
+            # Die Server-Adresse zeigt auf den Port, den diese Anwendung gerade selbst belegt hat: Der Server auf
+            # diesem PC läuft nicht mehr (z.B. deinstalliert). Zurück zur eigenen Datenbank, statt Anfragen
+            # im Kreis an sich selbst weiterzuleiten.
+            cfg["mode"] = "local"
+            config.save(args.config, cfg)
+            print("[desktop] Server auf diesem PC nicht mehr erreichbar – verwende die lokale Datenbank")
         settings.server = server
         server.start()
         port = server.port
@@ -304,6 +397,8 @@ def main(argv=None):
             print(f"Token für die App: {cfg['token']}")
             while True:
                 time.sleep(3600)
+        elif not args.browser and os.name == "nt" and run_windows_window(url):
+            pass   # Fenster wurde geschlossen -> Anwendung beenden
         elif args.browser or not run_gtk_window(url, local_prefix):
             webbrowser.open(url)
             if server:
