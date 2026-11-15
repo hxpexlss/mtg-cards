@@ -29,7 +29,8 @@ function renderWishlist(r) {
       <span class="muted">${r.items.length} Karten · aktuell ${esc(fmtEur(r.total_eur))}</span>
       <span class="spacer"></span>
       <button class="btn small" data-wact="refresh">⟳ Preise prüfen</button>
-      ${r.items.length ? `<button class="btn small primary" data-wact="proxies">🖨 Proxies drucken (PDF)</button>` : ""}
+      ${r.items.length ? `<button class="btn small" data-wact="topm" title="Ausgewählte (oder alle) Karten in eine Druckliste von Proxie Maker übernehmen – dort gestalten und drucken">→ Proxie Maker</button>
+        <button class="btn small primary" data-wact="proxies">🖨 Proxies drucken (PDF)</button>` : ""}
     </div>
     <form class="wish-add" id="wish-add" autocomplete="off">
       <input id="wish-name" list="wish-ac" placeholder="Karte (Name) …" required>
@@ -53,7 +54,8 @@ function renderWishlist(r) {
         <td>${esc(fmtEur(w.price_eur))}${w.price_set && w.any_print ? `<div class="muted small">${esc(w.price_set)}</div>` : ""}</td>
         <td>${w.target_reached ? `<span class="pill ok">✓ Zielpreis erreicht</span>` : (w.max_price_eur != null && w.price_eur != null
           ? `<span class="muted small">noch ${esc(fmtEur(w.price_eur - w.max_price_eur))}</span>` : "")}</td>
-        <td><button class="btn small danger" data-wop="del" title="Entfernen">✕</button></td>
+        <td><button class="btn small" data-wop="topm" title="In Proxie Maker übernehmen">→ 🖨</button>
+          <button class="btn small danger" data-wop="del" title="Entfernen">✕</button></td>
       </tr>`).join("")}</tbody></table>`
       : `<div class="empty"><p>Noch keine Wünsche. Karten oben eintragen – oder im Deck „Fehlende → Wunschliste“.</p></div>`}`;
 }
@@ -61,6 +63,7 @@ function renderWishlist(r) {
 async function wishOp(id, op) {
   const w = wish.items.find((x) => x.id === +id);
   if (op === "print") return chooseWishPrint(w);
+  if (op === "topm") return sendToProxieMaker([w.id]);
   try {
     if (op === "del") await api(`/api/wishlist/${id}`, { method: "DELETE" });
     if (op === "inc") await api(`/api/wishlist/${id}`, { method: "PATCH", json: { quantity: w.quantity + 1 } });
@@ -76,6 +79,55 @@ const wishAutocomplete = debounce(async (q) => {
     $("#wish-ac").innerHTML = data.slice(0, 20).map((n) => `<option value="${esc(n)}">`).join("");
   } catch (_) { /* egal */ }
 }, 200);
+
+/** Wünsche (ids leer = alle) in eine Druckliste von Proxie Maker übernehmen – mit gewähltem Druck und Zielpreis. */
+async function sendToProxieMaker(ids) {
+  let projects = [];
+  try { projects = (await api("/proxies/api/projects")).projects; } catch (e) { return toast(e.message, "err"); }
+  const sel = ids.length ? wish.items.filter((w) => ids.includes(w.id)) : wish.items;
+  let dlg = $("#dlg-topm");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "dlg-topm";
+    dlg.className = "modal";
+    document.body.appendChild(dlg);
+  }
+  const opts = (kind) => projects.filter((p) => (p.kind || "list") === kind)
+    .map((p) => `<option value="${p.id}">${esc(p.name)} (${p.cards} Karten)</option>`).join("");
+  dlg.innerHTML = `<form method="dialog" class="modal-body" id="topm-form">
+    <header><h2>→ Proxie Maker</h2><button type="button" class="x" data-close>×</button></header>
+    <p class="muted">${sel.length === 1 ? esc(sel[0].name) : `${ids.length ? "Ausgewählt" : "Ganze Wunschliste"}: ${sel.length} Karten`}
+      – mit gewähltem Druck, Anzahl und Zielpreis. In Proxie Maker kannst du sie dann gestalten und drucken.</p>
+    <label>Ziel <select id="topm-target">
+      <option value="new">＋ Neue Druckliste …</option>
+      ${opts("list") ? `<optgroup label="Drucklisten">${opts("list")}</optgroup>` : ""}
+      ${opts("deck") ? `<optgroup label="Decks">${opts("deck")}</optgroup>` : ""}</select></label>
+    <label id="topm-name-l">Name der neuen Druckliste <input id="topm-name" value="Wunschliste ${new Date().toLocaleDateString("de-DE")}"></label>
+    <footer><span class="spacer"></span><button type="button" class="btn" data-close>Abbrechen</button>
+      <button class="btn primary" value="default">Übernehmen</button></footer></form>`;
+  $$("[data-close]", dlg).forEach((b) => { b.onclick = () => dlg.close(); });
+  $("#topm-target", dlg).onchange = (e) => { $("#topm-name-l", dlg).style.display = e.target.value === "new" ? "" : "none"; };
+  $("#topm-form", dlg).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("button.primary", dlg);
+    btn.disabled = true;
+    btn.textContent = "Übernehme …";
+    try {
+      let pid = $("#topm-target", dlg).value;
+      if (pid === "new") {
+        pid = (await api("/proxies/api/projects", { method: "POST",
+          json: { name: $("#topm-name", dlg).value.trim() || "Wunschliste" } })).project.id;
+      }
+      const r = await api(`/proxies/api/projects/${pid}/import-mtg`, { method: "POST", json: { source: "wishlist", ids } });
+      dlg.close();
+      const missing = r.errors.length ? " – nicht gefunden: " + r.errors.slice(0, 5).join(", ") : "";
+      toast(`${r.added} Exemplare in Proxie Maker übernommen${missing}`, r.errors.length ? "err" : "ok");
+      try { localStorage.setItem("pm-tab", "list"); localStorage.setItem("pm-project-list", String(pid)); } catch (_) { /* egal */ }
+      if (confirm("Jetzt in Proxie Maker öffnen?")) location.href = "/proxies/";
+    } catch (err) { toast(err.message, "err"); btn.disabled = false; btn.textContent = "Übernehmen"; }
+  });
+  dlg.showModal();
+}
 
 /** Druck eines Wunsches wählen: Edition + Sprache (für Proxies und den richtigen Preis) oder "beliebig". */
 async function chooseWishPrint(w) {
@@ -206,6 +258,10 @@ function bindWishlist() {
     const op = e.target.closest("[data-wop]");
     if (op) { e.preventDefault(); return wishOp(op.closest("[data-wid]").dataset.wid, op.dataset.wop); }
     const a = e.target.closest("[data-wact]");
+    if (a && a.dataset.wact === "topm") {
+      const ids = $$(".wish-sel:checked").map((c) => +c.closest("[data-wid]").dataset.wid);
+      return sendToProxieMaker(ids);
+    }
     if (a && a.dataset.wact === "proxies") {
       const ids = $$(".wish-sel:checked").map((c) => +c.closest("[data-wid]").dataset.wid);
       const sel = ids.length ? wish.items.filter((w) => ids.includes(w.id)) : wish.items;

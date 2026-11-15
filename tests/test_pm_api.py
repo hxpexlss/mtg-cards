@@ -163,6 +163,11 @@ class TestApi(unittest.TestCase):
         r = self.call("POST", f"/api/projects/{p['id']}/import-mtg", {"source": "wishlist"})
         self.assertEqual(r["added"], 2)
         self.assertEqual((r["project"]["items"][0]["set_code"], r["project"]["items"][0]["max_price_eur"]), ("M11", 1.5))
+        # nur ausgewählte Wünsche
+        sol_wish = mtg.wishlist.add(normalize_card(SOL), 1)
+        p2 = self.project("Auswahl")
+        r = self.call("POST", f"/api/projects/{p2['id']}/import-mtg", {"source": "wishlist", "ids": [sol_wish["id"]]})
+        self.assertEqual([i["name"] for i in r["project"]["items"]], ["Sol Ring"])
         d = self.call("POST", "/api/projects", {"name": "Izzet", "kind": "deck", "mtg_deck_id": deck["id"]})["project"]
         self.assertEqual([(i["name"], i["board"]) for i in d["items"]], [("Sol Ring", "commander")])
 

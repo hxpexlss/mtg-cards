@@ -4,6 +4,13 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.1.0] – 2026-11-15
+
+### Neu
+- **Wunschliste → Proxie Maker:** einzelne, ausgewählte oder alle Wünsche in eine Druckliste (oder ein Deck) von
+  Proxie Maker übernehmen – mit gewähltem Druck, Anzahl und Zielpreis; auf Wunsch gleich eine neue Druckliste anlegen.
+  PC: „→ Proxie Maker“ oben (Auswahl oder alle) bzw. „→ 🖨“ in der Zeile; App: Wunschliste → „→ Proxie Maker“.
+
 ## [3.0.0] – 2026-11-15
 
 **MTG Cards und Proxie Maker in einer Anwendung.** Die Version 2.x bleibt im Branch

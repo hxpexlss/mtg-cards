@@ -568,7 +568,10 @@ def _mtg_import(h, pid, data):
     is_deck = project.get("kind") == "deck"
     wanted = []
     if data.get("source") == "wishlist":
+        only = {int(x) for x in data.get("ids") or [] if str(x).isdigit()}   # leer = ganze Wunschliste
         for w in _mtg_get(h, "/api/wishlist").get("items", []):
+            if only and w.get("id") not in only:
+                continue
             wanted.append({"name": w["name"], "scryfall_id": w.get("scryfall_id"), "quantity": w.get("quantity") or 1,
                            "max_price_eur": w.get("max_price_eur"), "any_print": not w.get("scryfall_id")})
     elif data.get("source") == "deck":

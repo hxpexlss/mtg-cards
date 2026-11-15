@@ -45,6 +45,7 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
             ProxyPdf.ask(requireContext(), viewLifecycleOwner.lifecycleScope, "/api/wishlist/proxies.pdf",
                 "proxies-wunschliste.pdf")
         }
+        view.findViewById<Button>(R.id.wishToPm).setOnClickListener { sendToProxieMaker() }
         view.findViewById<Button>(R.id.wishCustom).setOnClickListener {
             startActivity(android.content.Intent(requireContext(), CustomProxiesActivity::class.java))
         }
@@ -171,6 +172,102 @@ class WishlistFragment : Fragment(R.layout.fragment_wishlist) {
                 }
             } catch (_: ApiException) {
             }
+        }
+    }
+
+    /** Wünsche auswählen (oder alle) und in eine Druckliste von Proxie Maker übernehmen. */
+    private fun sendToProxieMaker() {
+        val ctx = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val items = try {
+                val arr = Api.fromPrefs(ctx).wishlist().getJSONArray("items")
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+            } catch (e: ApiException) {
+                Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (items.isEmpty()) {
+                Toast.makeText(ctx, "Die Wunschliste ist leer", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val checked = BooleanArray(items.size)
+            AlertDialog.Builder(ctx)
+                .setTitle("Welche Karten?")
+                .setMultiChoiceItems(items.map { "${it.optInt("quantity")}× ${it.optString("name")}" }.toTypedArray(), checked) { _, which, on ->
+                    checked[which] = on
+                }
+                .setPositiveButton("Auswahl") { _, _ ->
+                    val ids = items.filterIndexed { i, _ -> checked[i] }.map { it.optLong("id") }
+                    if (ids.isEmpty()) Toast.makeText(ctx, "Keine Karte ausgewählt", Toast.LENGTH_SHORT).show()
+                    else chooseProxieTarget(ids)
+                }
+                .setNeutralButton("Alle") { _, _ -> chooseProxieTarget(emptyList()) }
+                .setNegativeButton("Abbrechen", null)
+                .show()
+        }
+    }
+
+    private fun chooseProxieTarget(ids: List<Long>) {
+        val ctx = requireContext()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val api = Api.fromPrefs(ctx)
+            val projects = try {
+                val arr = api.pmProjects().getJSONArray("projects")
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+            } catch (e: ApiException) {
+                Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val labels = listOf("＋ Neue Druckliste …") + projects.map {
+                (if (it.optString("kind") == "deck") "Deck: " else "") + it.optString("name") + " (${it.optInt("cards")} Karten)"
+            }
+            AlertDialog.Builder(ctx)
+                .setTitle("In welche Druckliste?")
+                .setItems(labels.toTypedArray()) { _, which ->
+                    if (which == 0) {
+                        val name = EditText(ctx).apply {
+                            setText("Wunschliste " + java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.GERMANY)
+                                .format(java.util.Date()))
+                        }
+                        AlertDialog.Builder(ctx).setTitle("Name der Druckliste")
+                            .setView(LinearLayout(ctx).apply { setPadding(48, 16, 48, 0); addView(name) })
+                            .setPositiveButton("Anlegen") { _, _ ->
+                                viewLifecycleOwner.lifecycleScope.launch {
+                                    try {
+                                        val p = api.pmCreateList(name.text.toString().trim().ifBlank { "Wunschliste" })
+                                        importToProxies(p.getJSONObject("project").optLong("id"), ids)
+                                    } catch (e: ApiException) {
+                                        Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            .setNegativeButton("Abbrechen", null).show()
+                    } else {
+                        viewLifecycleOwner.lifecycleScope.launch { importToProxies(projects[which - 1].optLong("id"), ids) }
+                    }
+                }
+                .setNegativeButton("Abbrechen", null)
+                .show()
+        }
+    }
+
+    private suspend fun importToProxies(projectId: Long, ids: List<Long>) {
+        val ctx = context ?: return
+        try {
+            val r = Api.fromPrefs(ctx).pmImportWishlist(projectId, ids)
+            val errors = r.optJSONArray("errors")
+            AlertDialog.Builder(ctx)
+                .setTitle("${r.optInt("added")} Exemplare übernommen")
+                .setMessage(if (errors != null && errors.length() > 0)
+                    "Nicht gefunden:\n" + (0 until errors.length()).joinToString("\n") { errors.getString(it) }
+                else "Jetzt in Proxie Maker gestalten und drucken?")
+                .setPositiveButton("Proxie Maker öffnen") { _, _ ->
+                    startActivity(android.content.Intent(ctx, ProxieActivity::class.java))
+                }
+                .setNegativeButton("Später", null)
+                .show()
+        } catch (e: ApiException) {
+            Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show()
         }
     }
 

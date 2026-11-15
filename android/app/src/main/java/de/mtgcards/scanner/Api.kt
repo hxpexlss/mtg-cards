@@ -246,6 +246,16 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun wishDelete(id: Long) = json("DELETE", "/api/wishlist/$id")
 
+    // -- Proxie Maker (gleicher Server, /proxies/api) ---------------------------------
+    suspend fun pmProjects() = json("GET", "/proxies/api/projects")
+
+    suspend fun pmCreateList(name: String) = json("POST", "/proxies/api/projects", JSONObject().put("name", name))
+
+    /** Wünsche (ids leer = ganze Wunschliste) in eine Druckliste übernehmen – mit Druck, Anzahl und Zielpreis. */
+    suspend fun pmImportWishlist(projectId: Long, ids: List<Long>) = json("POST",
+        "/proxies/api/projects/$projectId/import-mtg",
+        JSONObject().put("source", "wishlist").put("ids", org.json.JSONArray(ids)))
+
     // -- Eigene Proxies (hochgeladene Bilder) ------------------------------------
     suspend fun customProxies() = json("GET", "/api/custom-proxies")
 
