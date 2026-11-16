@@ -4,6 +4,16 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.3.2] – 2026-11-16
+
+### Behoben
+- **„You are being rate-limited“ beim Einfügen von Decklisten:** Jede Karte wurde einzeln bei Scryfall gesucht
+  (bei „günstigster Druck“ sogar zweimal) – bei großen Decks schneller, als Scryfall erlaubt. Decklisten und
+  Übernahmen aus MTG Cards werden jetzt **gesammelt nachgeschlagen** (75 Karten pro Anfrage); den günstigsten Druck
+  ermittelt die Preisprüfung danach in Ruhe.
+- Suche und Namenssuche halten sich an Scryfalls Limit (etwa 2 Anfragen pro Sekunde). Meldet Scryfall trotzdem
+  „zu viele Anfragen“, macht der Server eine Pause statt weiterzufragen – so kann es keine Sperre geben.
+
 ## [3.3.1] – 2026-11-16
 
 ### Neu
