@@ -4,6 +4,12 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.3.1] – 2026-11-16
+
+### Neu
+- **App: ⌂-Knopf auch in MTG Cards** – zurück ins Startmenü wie in Proxie Maker: unten links in Suche, Decks,
+  Wunschliste und Verbindung, im Scan-Bildschirm oben links (unten liegen dort die Scan-Knöpfe).
+
 ## [3.3.0] – 2026-11-16
 
 ### Neu

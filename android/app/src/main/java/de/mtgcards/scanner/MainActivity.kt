@@ -13,6 +13,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         nav = findViewById(R.id.bottomNav)
+        findViewById<android.view.View>(R.id.btnHomeFloat).setOnClickListener {
+            StartActivity.open(this)
+            finish()
+        }
         if (Prefs.serverUrl(this).isNotBlank()) PriceAlertWorker.schedule(this)
         if (savedInstanceState == null) {
             val start = when {
@@ -42,5 +46,8 @@ class MainActivity : AppCompatActivity() {
             else -> ScanFragment()
         }
         supportFragmentManager.beginTransaction().replace(R.id.container, fragment).commit()
+        // Im Scan-Bildschirm sitzt der Knopf oben links (unten liegen dort die Bedienelemente)
+        findViewById<android.view.View>(R.id.btnHomeFloat).visibility =
+            if (fragment is ScanFragment) android.view.View.GONE else android.view.View.VISIBLE
     }
 }
