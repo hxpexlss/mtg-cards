@@ -242,6 +242,13 @@ class Api(private val baseUrl: String, private val token: String, private val fi
         if (maxPrice.isNotBlank()) put("max_price_eur", maxPrice)
     })
 
+    /** Genau diesen Druck wünschen. */
+    suspend fun wishAddPrint(scryfallId: String, quantity: Int = 1) = json("POST", "/api/wishlist",
+        JSONObject().put("scryfall_id", scryfallId).put("quantity", quantity).put("any_print", false))
+
+    /** Namensvorschläge (inkl. deutscher Namen, Embleme, Spielsteine). */
+    suspend fun autocomplete(q: String) = json("GET", "/api/autocomplete?q=${enc(q)}")
+
     suspend fun wishUpdate(id: Long, changes: JSONObject) = json("PUT", "/api/wishlist/$id", changes)
 
     suspend fun wishDelete(id: Long) = json("DELETE", "/api/wishlist/$id")

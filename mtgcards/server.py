@@ -449,6 +449,10 @@ def r_lookup(h, qs):
         raise ApiError(400, "name oder id angeben")
     card = normalize_card(_lookup_from(h, data))
     card["owned"] = h.ctx.db.find_owned(card["scryfall_id"], card["oracle_id"])
+    # Für „Karte nachschlagen“: wo die Karte schon vorkommt (nichts wird gespeichert)
+    card["decks"] = h.ctx.decks.usage_for(card.get("oracle_id"), card.get("name"))
+    card["wished"] = sum(w["quantity"] for w in h.ctx.wishlist.list()["items"]
+                         if (w.get("oracle_id") and w["oracle_id"] == card.get("oracle_id")) or w["name"] == card["name"])
     h.send_json(card)
 
 

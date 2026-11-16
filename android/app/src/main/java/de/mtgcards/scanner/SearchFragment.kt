@@ -77,6 +77,9 @@ class SearchFragment : Fragment(R.layout.fragment_search) {
             dupMin = if (ids.isNotEmpty()) 2 else 0
             search()
         }
+        view.findViewById<android.widget.Button>(R.id.btnLookup).setOnClickListener {
+            startActivity(android.content.Intent(requireContext(), LookupActivity::class.java))
+        }
         view.findViewById<android.widget.Button>(R.id.btnSets).setOnClickListener {
             startActivity(Intent(requireContext(), SetsActivity::class.java))
         }

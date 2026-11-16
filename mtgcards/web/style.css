@@ -380,3 +380,5 @@ dialog::backdrop { background: rgba(5, 4, 12, .6); backdrop-filter: blur(3px); }
 .custom-card .sel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); border-radius: 6px; padding: 2px 4px; margin: 0; }
 .custom-card .cn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .custom-card .row.tight { gap: 4px; flex-wrap: nowrap; }
+.pill.bad { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.pill.warn { background: color-mix(in srgb, var(--accent2) 22%, transparent); color: var(--accent2); }
