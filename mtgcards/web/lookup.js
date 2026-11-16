@@ -94,6 +94,7 @@ function renderLookup() {
         <label class="check" style="margin:0"><input type="checkbox" id="lk-foil"> Foil</label>
         <button class="btn primary" id="lk-add">＋ Zur Sammlung</button>
         <button class="btn" id="lk-wish">★ Auf Wunschliste</button>
+        <button class="btn" id="lk-pm" title="In eine Druckliste oder ein Deck von Proxie Maker – zum Gestalten und Drucken">🖨 In Proxie Maker</button>
         ${c.scryfall_uri ? `<a class="btn" href="${esc(c.scryfall_uri)}" target="_blank" rel="noopener">Scryfall ↗</a>` : ""}
       </div>
     </div></div>`;
@@ -107,6 +108,28 @@ function renderLookup() {
       toast(`${r.name} – jetzt ${r.quantity}× in der Sammlung`, "ok");
       if (typeof loadCards === "function") loadCards();
       lookupCard("id=" + encodeURIComponent(c.scryfall_id));
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("#lk-pm").onclick = async () => {
+    let projects;
+    try { projects = (await api("/proxies/api/projects")).projects; } catch (e) { return toast(e.message, "err"); }
+    const list = projects.map((p, i) => `${i + 1}: ${p.kind === "deck" ? "Deck: " : ""}${p.name}`).join("\n");
+    const pick = prompt(`In welche Druckliste? Nummer eingeben – oder einen neuen Namen für eine neue Druckliste.\n\n${list}`,
+      projects.length ? "1" : "Proxies");
+    if (!pick) return;
+    try {
+      let pid;
+      const n = parseInt(pick, 10);
+      if (String(n) === pick.trim() && projects[n - 1]) pid = projects[n - 1].id;
+      else pid = (await api("/proxies/api/projects", { method: "POST", json: { name: pick.trim() } })).project.id;
+      await api(`/proxies/api/projects/${pid}/items`, { method: "POST",
+        json: { scryfall_id: c.scryfall_id, quantity: +$("#lk-qty").value || 1 } });
+      toast(`${c.name} ist in Proxie Maker`, "ok");
+      if (confirm("Jetzt in Proxie Maker öffnen?")) {
+        try { localStorage.setItem("pm-tab", projects.find((p) => p.id === pid)?.kind || "list");
+          localStorage.setItem("pm-project-" + (projects.find((p) => p.id === pid)?.kind || "list"), String(pid)); } catch (_) { /* egal */ }
+        location.href = "/proxies/";
+      }
     } catch (e) { toast(e.message, "err"); }
   };
   $("#lk-wish").onclick = async () => {

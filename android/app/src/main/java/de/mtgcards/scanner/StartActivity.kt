@@ -97,6 +97,11 @@ class StartActivity : AppCompatActivity() {
                 if (remember.isChecked) setChoice(this@StartActivity, "pm")
                 openProxies()
             }, lp())
+            addView(tile("🔍 Karte nachschlagen", "Ansehen, dann auf die Wunschliste oder in Proxie Maker",
+                R.drawable.ic_search, "#3FB950") {
+                if (Prefs.serverUrl(this@StartActivity).isBlank()) openMtg()
+                else startActivity(Intent(this@StartActivity, LookupActivity::class.java))
+            }, lp())
             addView(remember)
             addView(TextView(context).apply {
                 text = if (configured) "Verbunden mit ${Prefs.serverUrl(this@StartActivity)}  ·  ändern unter MTG Cards → Verbindung"

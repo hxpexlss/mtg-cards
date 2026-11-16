@@ -186,6 +186,7 @@ class LookupActivity : AppCompatActivity() {
         }
         button("＋ Zur Sammlung") { addToCollection(c) }
         button("★ Auf die Wunschliste") { addToWishlist(c) }
+        button("🖨 In Proxie Maker") { addToProxies(c) }
         button("Auf Scryfall öffnen") {
             v("scryfall_uri")?.let { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
         }
@@ -209,6 +210,70 @@ class LookupActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Abbrechen", null).show()
+    }
+
+    /** In eine Druckliste oder ein Deck von Proxie Maker – zum Gestalten und Drucken. */
+    private fun addToProxies(c: JSONObject) {
+        lifecycleScope.launch {
+            val api = Api.fromPrefs(this@LookupActivity)
+            val projects = try {
+                val arr = api.pmProjects().getJSONArray("projects")
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+            } catch (e: ApiException) {
+                Toast.makeText(this@LookupActivity, e.message, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val qty = EditText(this@LookupActivity).apply { inputType = InputType.TYPE_CLASS_NUMBER; setText("1"); hint = "Anzahl" }
+            val labels = listOf("＋ Neue Druckliste …") + projects.map {
+                (if (it.optString("kind") == "deck") "Deck: " else "") + it.optString("name") + " (${it.optInt("cards")} Karten)"
+            }
+            AlertDialog.Builder(this@LookupActivity)
+                .setTitle("In Proxie Maker: ${c.optString("name")}")
+                .setItems(labels.toTypedArray()) { _, which ->
+                    if (which == 0) {
+                        val name = EditText(this@LookupActivity).apply { hint = "Name der Druckliste"; setText("Proxies") }
+                        AlertDialog.Builder(this@LookupActivity).setTitle("Neue Druckliste")
+                            .setView(LinearLayout(this@LookupActivity).apply {
+                                orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 0); addView(name); addView(qty)
+                            })
+                            .setPositiveButton("Anlegen") { _, _ ->
+                                lifecycleScope.launch {
+                                    try {
+                                        val p = api.pmCreateList(name.text.toString().trim().ifBlank { "Proxies" })
+                                        sendToProxies(p.getJSONObject("project").optLong("id"), c, qty.text.toString().toIntOrNull() ?: 1)
+                                    } catch (e: ApiException) {
+                                        Toast.makeText(this@LookupActivity, e.message, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            .setNegativeButton("Abbrechen", null).show()
+                    } else {
+                        val target = projects[which - 1]
+                        AlertDialog.Builder(this@LookupActivity).setTitle("Anzahl")
+                            .setView(LinearLayout(this@LookupActivity).apply { setPadding(48, 16, 48, 0); addView(qty) })
+                            .setPositiveButton("Hinzufügen") { _, _ ->
+                                lifecycleScope.launch { sendToProxies(target.optLong("id"), c, qty.text.toString().toIntOrNull() ?: 1) }
+                            }
+                            .setNegativeButton("Abbrechen", null).show()
+                    }
+                }
+                .setNegativeButton("Abbrechen", null)
+                .show()
+        }
+    }
+
+    private suspend fun sendToProxies(projectId: Long, c: JSONObject, quantity: Int) {
+        try {
+            Api.fromPrefs(this).pmAddCard(projectId, c.optString("scryfall_id"), quantity.coerceAtLeast(1))
+            AlertDialog.Builder(this)
+                .setTitle("${c.optString("name")} ist in Proxie Maker")
+                .setMessage("Jetzt gestalten und drucken?")
+                .setPositiveButton("Proxie Maker öffnen") { _, _ -> startActivity(Intent(this, ProxieActivity::class.java)) }
+                .setNegativeButton("Weiter nachschlagen", null)
+                .show()
+        } catch (e: ApiException) {
+            Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun addToWishlist(c: JSONObject) {

@@ -4,6 +4,14 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.3.0] – 2026-11-16
+
+### Neu
+- **App: „Karte nachschlagen“ direkt im Startmenü** (dritte Kachel neben MTG Cards und Proxie Maker).
+- **Nachschlagen → Proxie Maker:** die angesehene Karte (genau dieser Druck) in eine Druckliste oder ein Deck von
+  Proxie Maker legen oder dafür eine neue Druckliste anlegen – danach auf Wunsch gleich Proxie Maker öffnen.
+  Daneben weiterhin „Auf Wunschliste“ und „Zur Sammlung“. In der App und am PC.
+
 ## [3.2.0] – 2026-11-16
 
 ### Neu

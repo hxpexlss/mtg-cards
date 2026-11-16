@@ -258,6 +258,10 @@ class Api(private val baseUrl: String, private val token: String, private val fi
 
     suspend fun pmCreateList(name: String) = json("POST", "/proxies/api/projects", JSONObject().put("name", name))
 
+    /** Eine Karte (genau dieser Druck) in eine Druckliste / ein Deck von Proxie Maker legen. */
+    suspend fun pmAddCard(projectId: Long, scryfallId: String, quantity: Int) = json("POST",
+        "/proxies/api/projects/$projectId/items", JSONObject().put("scryfall_id", scryfallId).put("quantity", quantity))
+
     /** Wünsche (ids leer = ganze Wunschliste) in eine Druckliste übernehmen – mit Druck, Anzahl und Zielpreis. */
     suspend fun pmImportWishlist(projectId: Long, ids: List<Long>) = json("POST",
         "/proxies/api/projects/$projectId/import-mtg",
