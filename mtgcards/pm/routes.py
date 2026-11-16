@@ -143,6 +143,63 @@ def _resolve(h, data):
     return fields, price, pset, any_print
 
 
+def _resolve_many(h, wanted, lang=None):
+    """Viele Karten auf einmal: Scryfall-Sammelabfrage (75 Karten pro Anfrage) statt einzelner Suchen.
+
+    wanted: [{"name", "set", "cn", "scryfall_id", "any_print"}]. Gibt [(eintrag, (felder, preis, edition, beliebig)
+    oder ScryfallError)] zurück. Nicht gefundene (z.B. deutsche Namen) werden einzeln nachgeschlagen. Den günstigsten
+    Druck bei „beliebig“ berechnet die Preisprüfung später – das spart pro Karte eine Suche.
+    """
+    sf = h.ctx.scryfall
+    lang = (lang or "").strip().lower() or None
+    out = [None] * len(wanted)
+    found = {}
+    if hasattr(sf, "collection_identifiers"):
+        idents = []
+        for w in wanted:
+            if w.get("scryfall_id"):
+                idents.append({"id": w["scryfall_id"]})
+            elif w.get("set") and w.get("cn"):
+                idents.append({"set": str(w["set"]).lower(), "collector_number": str(w["cn"])})
+            elif w.get("set"):
+                idents.append({"name": w["name"].split(" // ")[0], "set": str(w["set"]).lower()})
+            else:
+                idents.append({"name": w["name"].split(" // ")[0]})
+        try:
+            cards, _ = sf.collection_identifiers(idents)
+        except ScryfallError:
+            cards = []
+        for c in cards:
+            found[("id", c.get("id"))] = c
+            found[("sc", (c.get("set") or "").lower(), str(c.get("collector_number")))] = c
+            for n in [c.get("name") or ""] + (c.get("name") or "").split(" // ")[:1]:
+                found.setdefault(("name", n.lower()), c)
+                found.setdefault(("nameset", n.lower(), (c.get("set") or "").lower()), c)
+    for i, w in enumerate(wanted):
+        raw = None
+        if w.get("scryfall_id"):
+            raw = found.get(("id", w["scryfall_id"]))
+        elif w.get("set") and w.get("cn"):
+            raw = found.get(("sc", str(w["set"]).lower(), str(w["cn"]).lstrip("0") or "0")) or \
+                found.get(("sc", str(w["set"]).lower(), str(w["cn"])))
+        elif w.get("set"):
+            raw = found.get(("nameset", w["name"].split(" // ")[0].lower(), str(w["set"]).lower()))
+        else:
+            raw = found.get(("name", w["name"].lower())) or found.get(("name", w["name"].split(" // ")[0].lower()))
+        try:
+            if raw is None:   # z.B. deutscher Name -> einzeln (Namenssuche in allen Sprachen)
+                out[i] = (w, _resolve(h, dict(w, lang=lang)))
+                continue
+            any_print = bool(w.get("any_print")) and not w.get("scryfall_id") and not w.get("set")
+            if lang and (raw.get("lang") or "en") != lang and hasattr(sf, "localize"):
+                raw = sf.localize(raw, lang, keep_print=not any_print)
+            raw = sf.with_prices(raw)
+            out[i] = (w, (card_fields(raw), price_of(raw), None, any_print))
+        except ScryfallError as e:
+            out[i] = (w, e)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Routen
 # ---------------------------------------------------------------------------
@@ -215,14 +272,14 @@ def _import_list(h, pid, text, lang=None):
         raise ApiError(400, "Keine Karten in der Liste erkannt")
     is_deck = (h.ctx.store.project(pid) or {}).get("kind") == "deck"
     errors = []
-    for e in entries:
-        try:
-            fields, price, pset, any_print = _resolve(h, {"name": e["name"], "set": e.get("set"), "cn": e.get("cn"),
-                                                          "lang": lang, "any_print": not e.get("set")})
-            h.ctx.store.add_item(pid, fields, e["quantity"], any_print, price, pset,
-                                 board=e.get("board", "main") if is_deck else "main")
-        except ScryfallError as err:
-            errors.append(f"{e['name']}: {err}")
+    wanted = [{"name": e["name"], "set": e.get("set"), "cn": e.get("cn"), "any_print": not e.get("set")} for e in entries]
+    for (w, res), e in zip(_resolve_many(h, wanted, lang), entries):
+        if isinstance(res, ScryfallError):
+            errors.append(f"{e['name']}: {res}")
+            continue
+        fields, price, pset, any_print = res
+        h.ctx.store.add_item(pid, fields, e["quantity"], any_print, price, pset,
+                             board=e.get("board", "main") if is_deck else "main")
     return errors
 
 
@@ -591,9 +648,11 @@ def _mtg_import(h, pid, data):
     else:
         raise ApiError(400, "source muss 'wishlist' oder 'deck' sein")
     errors, added = [], 0
-    for w in wanted:
+    for w, res in _resolve_many(h, wanted, data.get("lang")):
         try:
-            fields, price, pset, any_print = _resolve(h, dict(w, lang=data.get("lang")))
+            if isinstance(res, ScryfallError):
+                raise res
+            fields, price, pset, any_print = res
             h.ctx.store.add_item(pid, fields, _qty(w["quantity"]), any_print, price, pset,
                                  _price_in(w.get("max_price_eur")), board=w.get("board") or "main")
             added += w["quantity"]

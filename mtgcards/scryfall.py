@@ -234,6 +234,11 @@ class Scryfall:
         self.min_interval = min_interval
         self._lock = threading.Lock()
         self._last = 0.0
+        # Scryfall: Suche, Namenssuche, Sammelabfrage und Zufall nur ~2 Anfragen/Sekunde, alles andere ~10/Sekunde
+        self.slow_interval = max(min_interval, 0.55) if min_interval > 0 else 0
+        self._slow_lock = threading.Lock()
+        self._slow_last = 0.0
+        self._cooldown_until = 0.0     # nach "429 Too Many Requests": Pause, damit Scryfall nicht sperrt
         self._cache = OrderedDict()
         self._cache_size = cache_size
         self._cache_lock = threading.Lock()
@@ -252,7 +257,18 @@ class Scryfall:
             except Exception:  # noqa: BLE001 – Cache-Fehler nie nach außen geben
                 pass
 
+    _SLOW_PATHS = ("/cards/search", "/cards/named", "/cards/collection", "/cards/random")
+
     def _request(self, url, body=None):
+        if time.monotonic() < self._cooldown_until:
+            left = int(self._cooldown_until - time.monotonic()) + 1
+            raise ScryfallError(f"Scryfall bittet um eine kurze Pause – bitte in {left} Sekunden erneut versuchen", 429)
+        if any(sp in url for sp in self._SLOW_PATHS):
+            with self._slow_lock:
+                wait = self.slow_interval - (time.monotonic() - self._slow_last)
+                if wait > 0:
+                    time.sleep(wait)
+                self._slow_last = time.monotonic()
         with self._lock:
             wait = self.min_interval - (time.monotonic() - self._last)
             if wait > 0:
@@ -268,6 +284,15 @@ class Scryfall:
             with urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as e:
+            if e.code == 429:
+                # Zu viele Anfragen: eine Weile gar nichts mehr schicken (sonst droht eine Sperre)
+                try:
+                    pause = max(5, min(120, int(e.headers.get("Retry-After") or 60)))
+                except (TypeError, ValueError):
+                    pause = 60
+                self._cooldown_until = time.monotonic() + pause
+                raise ScryfallError(f"Scryfall bittet um eine kurze Pause – bitte in {pause} Sekunden erneut versuchen",
+                                    429) from None
             try:
                 details = json.loads(e.read().decode("utf-8")).get("details")
             except Exception:  # noqa: BLE001
