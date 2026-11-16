@@ -149,6 +149,12 @@ def normalize_card(raw):
     card["released_at"] = raw.get("released_at")
     card["illustration_id"] = raw.get("illustration_id") or (faces[0].get("illustration_id") if faces else None)
     card["art_url"] = art
+    card["image_url_back"] = ((faces[1].get("image_uris") or {}).get("normal")
+                              if not raw.get("image_uris") and len(faces) > 1 else None)
+    legal = raw.get("legalities") or {}
+    card["legalities"] = {k: legal.get(k) for k in ("commander", "standard", "pioneer", "modern", "legacy",
+                                                       "vintage", "pauper", "brawl") if legal.get(k)}
+    card["flavor_text"] = raw.get("flavor_text") or (faces[0].get("flavor_text") if faces else None)
     card["auto_tags"] = auto_tags(card)
     card["match"] = raw.get("_match")      # wie sicher der Druck ist (nur für die Anzeige, nicht gespeichert)
     return card

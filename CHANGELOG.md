@@ -4,6 +4,15 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.2.0] – 2026-11-16
+
+### Neu
+- **Karte nachschlagen:** beliebige Karte per Name ansehen (deutsch oder englisch, mit Vorschlägen), ohne sie zu
+  speichern – großes Bild (doppelseitige Karten zum Umdrehen), Regeltext, Preise (normal/Foil, € und $), Legalität in
+  den Formaten, Künstler, alle Drucke und Sprachen, und ob du sie schon hast (Sammlung, Wunschliste, Decks).
+  Von dort auf Wunsch „Zur Sammlung“ oder „Auf Wunschliste“ (bestimmter oder günstigster Druck).
+  PC: „🔍 Nachschlagen“ oben (oder Strg+K), App: Suche → „Beliebige Karte nachschlagen“.
+
 ## [3.1.1] – 2026-11-15
 
 ### Behoben

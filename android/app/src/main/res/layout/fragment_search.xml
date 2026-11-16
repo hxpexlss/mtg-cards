@@ -8,6 +8,13 @@
     android:paddingTop="12dp">
 
     <Button
+        android:id="@+id/btnLookup"
+        style="@style/Widget.Material3.Button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔍 Beliebige Karte nachschlagen" />
+
+    <Button
         android:id="@+id/btnSets"
         style="@style/Widget.Material3.Button.TonalButton"
         android:layout_width="match_parent"
