@@ -187,6 +187,10 @@ class ScanFragment : Fragment(R.layout.fragment_scan) {
         }
         setupMenu(view)   // nach den Schaltern, damit die Modus-Zeile stimmt
 
+        view.findViewById<ImageButton>(R.id.btnHome).setOnClickListener {
+            StartActivity.open(requireContext())
+            requireActivity().finish()
+        }
         view.findViewById<ImageButton>(R.id.btnTorch).setOnClickListener {
             torchOn = !torchOn
             camera?.cameraControl?.enableTorch(torchOn)

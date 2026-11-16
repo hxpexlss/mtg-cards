@@ -6,10 +6,27 @@
     android:orientation="vertical">
 
     <FrameLayout
-        android:id="@+id/container"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
+
+        <FrameLayout
+            android:id="@+id/container"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Zurück ins Startmenü (MTG Cards / Proxie Maker / Nachschlagen); im Scan-Bildschirm oben links -->
+        <ImageButton
+            android:id="@+id/btnHomeFloat"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="bottom|start"
+            android:layout_margin="10dp"
+            android:alpha="0.9"
+            android:background="@drawable/bg_status"
+            android:contentDescription="Startmenü"
+            android:src="@drawable/ic_home" />
+    </FrameLayout>
 
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
