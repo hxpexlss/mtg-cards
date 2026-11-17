@@ -58,7 +58,7 @@ function fileToJpeg(file, maxPx = 2200, quality = 0.92) {
       g.fillRect(0, 0, c.width, c.height);
       g.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL("image/jpeg", quality));
+      resolve(c.toDataURL("image/png"));    // verlustfrei
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name}: kein lesbares Bild`)); };
     img.src = url;
@@ -80,7 +80,7 @@ function fileToCard(file, fit = "cover") {
       g.imageSmoothingQuality = "high";
       g.drawImage(img, (745 - img.width * s) / 2, (1040 - img.height * s) / 2, img.width * s, img.height * s);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL("image/jpeg", 0.93));
+      resolve(c.toDataURL("image/png"));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name}: kein lesbares Bild`)); };
     img.src = url;
@@ -528,6 +528,8 @@ function printDialog() {
     <label class="check"><input type="checkbox" id="pr-cut" checked> Schnittmarken</label>
     <label class="check"><input type="checkbox" id="pr-duplex"> Beidseitig drucken (Rückseiten-Seiten einfügen, Wenden an der langen Kante)</label>
     <label class="check"><input type="checkbox" id="pr-hq" checked> Unscharfe Scryfall-Bilder durch scharfe mit gleichem Artwork ersetzen</label>
+    <label class="check" title="PNG statt JPEG: beste Qualität, die PDF wird aber deutlich größer (ca. 1–2 MB pro Karte)">
+      <input type="checkbox" id="pr-lossless" checked> Verlustfrei (PNG – beste Qualität, große Datei)</label>
     <p class="muted small">Beim Drucken <b>100 % / tatsächliche Größe</b> wählen. Doppelseitige Karten: ohne „Beidseitig“
       wird die Rückseite als eigene Karte gedruckt. „Bilder (ZIP)“ liefert jede Karte als Einzelbild, z.B. für Druckdienste.</p>
     <footer><a class="btn" id="pr-zip">Bilder (ZIP)</a><span class="spacer"></span>
@@ -539,6 +541,7 @@ function printDialog() {
   const params = () => {
     const q = new URLSearchParams({ paper: $("#pr-paper", d).value, gap: $("#pr-gap", d).value,
       cut: $("#pr-cut", d).checked ? "1" : "0", hq: $("#pr-hq", d).checked ? "1" : "0",
+      lossless: $("#pr-lossless", d).checked ? "1" : "0",
       duplex: $("#pr-duplex", d).checked ? "1" : "0", token: state.token });
     if ($("#pr-copies", d).value) q.set("copies", "one");
     if (ids.length) q.set("ids", ids.join(","));

@@ -206,7 +206,7 @@ class CustomProxiesActivity : AppCompatActivity() {
             Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
         src.recycle()
         val bytes = ByteArrayOutputStream().use { os ->
-            out.compress(Bitmap.CompressFormat.JPEG, 90, os)
+            out.compress(Bitmap.CompressFormat.PNG, 100, os)    // verlustfrei
             os.toByteArray()
         }
         out.recycle()

@@ -52,13 +52,17 @@ def _text(row):
             "text": "", "pt": ""}
 
 
-def _scryfall_images(scryfall, row, cache_dir, fetch, sharpen):
-    """(Vorderseite, Rückseite) als JPEG für einen unbearbeiteten Scryfall-Eintrag."""
-    front_url, back_url = row.get("image_url"), row.get("image_url_back")
+def _scryfall_images(scryfall, row, cache_dir, fetch, sharpen, lossless=True):
+    """(Vorderseite, Rückseite) für einen unbearbeiteten Scryfall-Eintrag – PNG (verlustfrei) oder JPEG."""
+    if lossless:
+        front_url = row.get("png_url") or row.get("image_url")
+        back_url = row.get("png_url_back") or row.get("image_url_back")
+    else:
+        front_url, back_url = row.get("image_url"), row.get("image_url_back")
     if sharpen and row.get("image_status") in ("lowres", "placeholder", "missing") and row.get("scryfall_id"):
         try:
             better = sharper_print(scryfall, scryfall.lookup(scryfall_id=row["scryfall_id"]))
-            urls = card_images(better)
+            urls = card_images(better, png=lossless)
             if urls:
                 front_url = urls[0]
                 back_url = urls[1] if len(urls) > 1 else back_url
@@ -69,7 +73,8 @@ def _scryfall_images(scryfall, row, cache_dir, fetch, sharpen):
     return front, back
 
 
-def collect(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, duplex=False, card_back=None, one=False):
+def collect(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, duplex=False, card_back=None, one=False,
+            lossless=True):
     """Druck-Einträge. Ohne duplex werden Rückseiten doppelseitiger Karten als eigene Karte gedruckt."""
     entries = []
     for row in rows:
@@ -81,7 +86,7 @@ def collect(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, dup
         if front is None or (back is None and row.get("image_url_back")):
             f2, b2 = (None, None)
             if row.get("kind") == "scryfall":
-                f2, b2 = _scryfall_images(scryfall, row, cache_dir, fetch, sharpen)
+                f2, b2 = _scryfall_images(scryfall, row, cache_dir, fetch, sharpen, lossless)
             front = front if front is not None else f2
             back = back if back is not None else b2
         front, back = (bytes(front) if front else None), (bytes(back) if back else None)
@@ -97,15 +102,19 @@ def collect(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, dup
 
 
 def make_pdf(scryfall, project, rows, cache_dir=None, fetch=fetch_image, paper="a4", cut=True, gap=0.0,
-             sharpen=True, duplex=False, card_back=None, one=False):
-    entries = collect(scryfall, rows, cache_dir, fetch, sharpen, duplex, card_back, one)
+             sharpen=True, duplex=False, card_back=None, one=False, lossless=True):
+    entries = collect(scryfall, rows, cache_dir, fetch, sharpen, duplex, card_back, one, lossless)
     if not entries:
         return None
     return build_pdf(entries, paper=paper, cut_marks=cut, gap_mm=gap, title=f"Proxie Maker - {project['name']}",
-                     duplex=duplex)
+                     duplex=duplex, image_cache=os.path.join(cache_dir, "pdf-rgb") if cache_dir else None)
 
 
-def make_zip(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, card_back=None):
+def _ext(data):
+    return ".png" if bytes(data[:8]) == b"\x89PNG\r\n\x1a\n" else ".jpg"
+
+
+def make_zip(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, card_back=None, lossless=True):
     """Einzelbilder (je Karte einmal, Anzahl im Dateinamen) – z.B. für Druckdienste."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
@@ -116,7 +125,7 @@ def make_zip(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, ca
             if front is None or (back is None and row.get("image_url_back")):
                 f2, b2 = (None, None)
                 if row.get("kind") == "scryfall":
-                    f2, b2 = _scryfall_images(scryfall, row, cache_dir, fetch, sharpen)
+                    f2, b2 = _scryfall_images(scryfall, row, cache_dir, fetch, sharpen, lossless)
                 front = front if front is not None else f2
                 back = back if back is not None else b2
             if front is None:
@@ -124,9 +133,9 @@ def make_zip(scryfall, rows, cache_dir=None, fetch=fetch_image, sharpen=True, ca
             n += 1
             safe = re.sub(r"[^A-Za-z0-9_-]+", "-", row["name"]).strip("-")[:60] or "karte"
             q = max(1, int(row.get("quantity") or 1))
-            z.writestr(f"{n:03d}_{safe}_x{q}.jpg", bytes(front))
+            z.writestr(f"{n:03d}_{safe}_x{q}{_ext(front)}", bytes(front))
             if back:
-                z.writestr(f"{n:03d}_{safe}_x{q}_rueckseite.jpg", bytes(back))
+                z.writestr(f"{n:03d}_{safe}_x{q}_rueckseite{_ext(back)}", bytes(back))
         if card_back:
-            z.writestr("kartenrueckseite.jpg", bytes(card_back))
+            z.writestr("kartenrueckseite" + _ext(card_back), bytes(card_back))
     return buf.getvalue()

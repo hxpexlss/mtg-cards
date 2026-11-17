@@ -8,6 +8,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
+from .. import pngimg
 from ..proxies import jpeg_info
 
 SCHEMA = """
@@ -75,7 +76,7 @@ ITEM_FIELDS = ("id", "project_id", "kind", "name", "oracle_id", "scryfall_id", "
                "position", "board", "created_at", "updated_at")
 CARD_KEYS = ("name", "oracle_id", "scryfall_id", "set_code", "collector_number", "lang", "type_line", "mana_cost",
              "image_url", "image_url_back", "png_url", "png_url_back", "image_status")
-MAX_IMAGE = 12 * 1024 * 1024
+MAX_IMAGE = 25 * 1024 * 1024
 BOARDS = ("commander", "companion", "main", "side", "maybe")
 LOWRES = ("lowres", "placeholder", "missing")
 
@@ -103,10 +104,15 @@ def decode_jpeg(value):
     if not data:
         raise StoreError("Kein Bild angegeben")
     if len(data) > MAX_IMAGE:
-        raise StoreError("Bild ist zu groß (höchstens 12 MB)")
-    if not jpeg_info(data):
-        raise StoreError("Bitte ein JPEG-Bild senden")
+        raise StoreError("Bild ist zu groß (höchstens 25 MB)")
+    if not (jpeg_info(data) or pngimg.png_info(data)):
+        raise StoreError("Bitte ein PNG- oder JPEG-Bild senden")
     return data
+
+def image_type(data):
+    """MIME-Typ eines gespeicherten Bildes (PNG oder JPEG)."""
+    return "image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+
 
 
 def card_fields(raw):
