@@ -122,7 +122,7 @@ class TestApi(unittest.TestCase):
         z = zipfile.ZipFile(io.BytesIO(self.call("GET", f"/api/projects/{p['id']}/images.zip", raw=True)))
         names = z.namelist()
         self.assertIn("kartenrueckseite.jpg", names)
-        self.assertTrue(any(n.endswith("_rueckseite.jpg") for n in names))
+        self.assertTrue(any(n.endswith(("_rueckseite.png", "_rueckseite.jpg")) for n in names))
         self.assertTrue(any("Sol-Ring_x2" in n for n in names))
         # Zurücksetzen
         it = self.call("DELETE", f"/api/items/{sol['id']}/rendered?settings=1")

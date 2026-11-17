@@ -483,9 +483,9 @@ async function openEditor(item) {
 async function saveItem(item, s, images, artData) {
   if (artData) await api(`/api/items/${item.id}/art`, { method: "PUT", json: { image: artData } });
   const c = document.createElement("canvas");
-  const front = renderCard(c, s, images).toDataURL("image/jpeg", 0.95);
+  const front = renderCard(c, s, images).toDataURL("image/png");      // verlustfrei
   const body = { front, settings: s };
-  if (images.back) body.back = renderCard(c, s, { base: images.back }, { back: true }).toDataURL("image/jpeg", 0.95);
+  if (images.back) body.back = renderCard(c, s, { base: images.back }, { back: true }).toDataURL("image/png");
   await api(`/api/items/${item.id}/rendered`, { method: "PUT", json: body });
 }
 

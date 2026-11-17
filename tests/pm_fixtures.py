@@ -75,7 +75,9 @@ class FakeScryfall:
 
 
 def fake_fetch(url, cache_dir=None):
-    return JPEG if url and url.endswith(".jpg") else None
+    if not url:
+        return None
+    return JPEG if url.endswith(".jpg") else (PNG if url.endswith(".png") else None)
 
 
 def fake_fetch_any(url, cache_dir=None):

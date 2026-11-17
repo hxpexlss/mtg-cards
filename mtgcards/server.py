@@ -981,7 +981,8 @@ def _send_proxies(h, qs, items, title, filename, entries=None):
             raise ApiError(400, "Keine Karten ausgewählt")
         entries, errors = proxies.collect_entries(h.ctx.scryfall, items, _proxy_cache_dir(h),
                                                   fetch=getattr(h.ctx, "image_fetcher", proxies.fetch_image),
-                                                  sharpen=_first(qs, "hq", "1") != "0")
+                                                  sharpen=_first(qs, "hq", "1") != "0",
+                                                  lossless=_first(qs, "lossless", "1") != "0")
         if not entries:
             raise ApiError(404, "Keine Karten gefunden: " + "; ".join(errors))
     if not entries:
@@ -991,7 +992,7 @@ def _send_proxies(h, qs, items, title, filename, entries=None):
     except ValueError:
         gap = 0.0
     pdf = proxies.build_pdf(entries, paper=_first(qs, "paper", "a4"), cut_marks=_first(qs, "cut", "1") != "0",
-                            gap_mm=gap, title=title)
+                            gap_mm=gap, title=title, image_cache=os.path.join(_proxy_cache_dir(h), "pdf-rgb"))
     h.send_bytes(pdf, "application/pdf", filename=filename)
 
 
@@ -1055,7 +1056,7 @@ def r_custom_image(h, qs, pid):
     img = h.ctx.custom.image(_card_id(pid))
     if img is None:
         raise ApiError(404, "Eigener Proxy nicht gefunden")
-    h.send_bytes(img, "image/jpeg", cache=True)
+    h.send_bytes(img, "image/png" if img[:4] == b"\x89PNG" else "image/jpeg", cache=True)
 
 
 def r_custom_pdf(h, qs):

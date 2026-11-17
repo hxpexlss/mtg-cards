@@ -4,6 +4,20 @@ Neueste Version oben. Aus diesen Einträgen werden automatisch die Release-Notes
 (`.github/scripts/release_notes.py`). Für eine neue Version einfach oben einen Abschnitt
 `## [x.y.z] – JJJJ-MM-TT` ergänzen.
 
+## [3.4.0] – 2026-11-17
+
+### Neu
+- **Verlustfreier Proxy-Druck (PNG):** Die PDF nutzt jetzt Scryfalls PNG-Bilder (745 × 1040, beste Qualität) und
+  bettet sie verlustfrei ein (FlateDecode) – kein JPEG mehr. Gilt für Proxie Maker, Wunschliste, Decks und eigene
+  Proxies. Im Druck-Dialog abschaltbar („Verlustfrei“), falls eine kleinere Datei gebraucht wird.
+- **Personalisierte Karten, eigene Bilder, Artwork und Rückseiten werden als PNG gespeichert** (vorher JPEG 92–95 %).
+- ZIP-Export liefert PNG-Dateien.
+
+### Hinweise
+- Die PDF wird deutlich größer (etwa 1–2 MB pro Karte, gleiche Karten nur einmal). Der Server entpackt jedes Bild
+  einmal (rund eine halbe Sekunde pro Karte) und merkt es sich – weitere PDFs gehen schnell.
+- Bereits gespeicherte Bearbeitungen sind noch JPEG: einmal im Editor öffnen und speichern, dann sind sie verlustfrei.
+
 ## [3.3.2] – 2026-11-16
 
 ### Behoben

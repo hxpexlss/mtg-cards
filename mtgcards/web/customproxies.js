@@ -72,7 +72,7 @@ function imageToCardJpeg(file, fit) {
       g.imageSmoothingQuality = "high";
       g.drawImage(img, (c.width - w) / 2, (c.height - h) / 2, w, h);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL("image/jpeg", 0.92));
+      resolve(c.toDataURL("image/png"));    // verlustfrei
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name}: Bild kann nicht gelesen werden`)); };
     img.src = url;

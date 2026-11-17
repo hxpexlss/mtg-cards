@@ -10,7 +10,7 @@ from ..decks import parse_decklist
 from ..proxies import fetch_image
 from ..scryfall import ScryfallError
 from .printing import fetch_any, make_pdf, make_zip
-from .store import Store, StoreError, card_fields, decode_jpeg, price_of
+from .store import Store, StoreError, card_fields, decode_jpeg, image_type, price_of
 
 APP_NAME = "proxie-maker"
 
@@ -335,7 +335,7 @@ def r_item_base(h, qs, iid):
     back = _first(qs, "side") == "back"
     if it["kind"] == "custom":
         img = h.ctx.store.blob(it["id"], "custom_image")
-        return h.send_bytes(img, "image/jpeg", cache=True)
+        return h.send_bytes(img, image_type(img), cache=True)
     for url in ((it["png_url_back"], it["image_url_back"]) if back else (it["png_url"], it["image_url"])):
         data = h.ctx.any_fetcher(url, h.ctx.cache_dir) if url else None
         if data:
@@ -350,7 +350,7 @@ def r_item_blob_get(h, qs, iid, column):
     data = h.ctx.store.blob(_id(iid), col)
     if data is None:
         raise ApiError(404, "Kein Bild")
-    h.send_bytes(data, "image/jpeg", cache=True)
+    h.send_bytes(data, image_type(data), cache=True)
 
 
 def r_item_art_put(h, qs, iid):
@@ -448,7 +448,7 @@ def r_print_pdf(h, qs, pid):
     pdf = make_pdf(h.ctx.scryfall, project, rows, h.ctx.cache_dir, h.ctx.image_fetcher,
                    paper=_first(qs, "paper", "a4"), cut=_first(qs, "cut", "1") != "0", gap=gap,
                    sharpen=_first(qs, "hq", "1") != "0", duplex=_first(qs, "duplex") == "1", card_back=back,
-                   one=_first(qs, "copies") == "one")
+                   one=_first(qs, "copies") == "one", lossless=_first(qs, "lossless", "1") != "0")
     if pdf is None:
         raise ApiError(400, "Keine Karten ausgewählt")
     safe = re.sub(r"[^A-Za-z0-9_-]+", "-", project["name"]).strip("-") or "proxies"
@@ -458,7 +458,8 @@ def r_print_pdf(h, qs, pid):
 def r_print_zip(h, qs, pid):
     project, rows, back = _print_args(h, qs, pid)
     data = make_zip(h.ctx.scryfall, rows, h.ctx.cache_dir, h.ctx.image_fetcher,
-                    sharpen=_first(qs, "hq", "1") != "0", card_back=back)
+                    sharpen=_first(qs, "hq", "1") != "0", card_back=back,
+                    lossless=_first(qs, "lossless", "1") != "0")
     safe = re.sub(r"[^A-Za-z0-9_-]+", "-", project["name"]).strip("-") or "proxies"
     h.send_bytes(data, "application/zip", filename=f"proxies-{safe}.zip")
 
@@ -525,7 +526,7 @@ def r_back_image(h, qs, bid):
     data = h.ctx.store.back_image(_id(bid))
     if data is None:
         raise ApiError(404, "Rückseite nicht gefunden")
-    h.send_bytes(data, "image/jpeg", cache=True)
+    h.send_bytes(data, image_type(data), cache=True)
 
 
 def r_back_delete(h, qs, bid):

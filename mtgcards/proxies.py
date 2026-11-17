@@ -10,6 +10,7 @@ import textwrap
 from urllib.request import Request, urlopen
 
 from . import __version__
+from . import pngimg
 from .scryfall import ScryfallError
 
 MM = 72 / 25.4
@@ -43,16 +44,24 @@ def jpeg_info(data):
     return None
 
 
-def card_images(raw):
-    """Bild-URLs (groß) einer Scryfall-Karte; doppelseitige Karten liefern Vorder- und Rückseite."""
+def card_images(raw, png=False):
+    """Bild-URLs einer Scryfall-Karte; doppelseitige Karten liefern Vorder- und Rückseite.
+    png=True: verlustfreies PNG (745 × 1040), sonst JPEG "large" (672 × 936)."""
+    def pick(uris):
+        return (uris.get("png") if png else None) or uris.get("large") or uris.get("normal")
     if raw.get("image_uris"):
-        return [raw["image_uris"].get("large") or raw["image_uris"].get("normal")]
+        return [u for u in [pick(raw["image_uris"])] if u]
     out = []
     for face in raw.get("card_faces") or []:
         uris = face.get("image_uris") or {}
         if uris:
-            out.append(uris.get("large") or uris.get("normal"))
+            out.append(pick(uris))
     return [u for u in out if u]
+
+
+def image_ok(data):
+    """JPEG oder PNG?"""
+    return bool(data) and (jpeg_info(data) is not None or pngimg.png_info(data) is not None)
 
 
 LOWRES = ("lowres", "placeholder", "missing")
@@ -102,7 +111,7 @@ def fetch_image(url, cache_dir=None, timeout=20):
             data = None
     if data is None:
         return None
-    if not jpeg_info(data):
+    if not image_ok(data):
         return None
     if path:
         try:
@@ -114,7 +123,7 @@ def fetch_image(url, cache_dir=None, timeout=20):
     return data
 
 
-def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image, sharpen=True):
+def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image, sharpen=True, lossless=False):
     """items: [{"name", "scryfall_id"(opt), "copies"}] -> Liste druckbarer Karten (pro Exemplar/Seite ein Eintrag)."""
     entries, errors = [], []
     for it in items:
@@ -131,7 +140,7 @@ def collect_entries(scryfall, items, cache_dir=None, fetch=fetch_image, sharpen=
         if raw and sharpen:
             raw = sharper_print(scryfall, raw)
         if raw:
-            for url in card_images(raw):
+            for url in card_images(raw, png=lossless):
                 img = fetch(url, cache_dir)
                 faces.append({"image": img, "url": url})
             if not faces or any(f["image"] is None for f in faces):
@@ -203,7 +212,8 @@ def _text_ops(x, y, size, text, font="F1"):
     return f"BT /{font} {size:.1f} Tf {x:.2f} {y:.2f} Td ({_pdf_text(text)}) Tj ET\n"
 
 
-def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards Proxies", duplex=False):
+def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards Proxies", duplex=False,
+              image_cache=None):
     """Erzeugt die PDF (Bytes). entries: {"image": JPEG-Bytes|None, "text": {...}, "back": JPEG-Bytes|None}.
 
     duplex=True: nach jeder Vorderseite eine Seite mit den Rückseiten, gespiegelt für beidseitigen Druck
@@ -231,11 +241,23 @@ def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards 
         key = hashlib.sha1(img).hexdigest()
         if key in images:
             continue
-        w, h, comps = jpeg_info(img)
-        cs = {1: "/DeviceGray", 4: "/DeviceCMYK"}.get(comps, "/DeviceRGB")
-        extra = " /Decode [1 0 1 0 1 0 1 0]" if comps == 4 else ""
-        num = pdf.stream(f"/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace {cs}"
-                         f" /BitsPerComponent 8 /Filter /DCTDecode{extra}", img)
+        if pngimg.is_png(img):
+            # verlustfrei: entpacktes RGB, zlib-komprimiert (FlateDecode)
+            try:
+                w, h, flate = pngimg.pdf_stream(img, image_cache)
+            except (pngimg.PngError, ValueError, OSError):
+                continue
+            num = pdf.stream(f"/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB"
+                             f" /BitsPerComponent 8 /Filter /FlateDecode", flate)
+        else:
+            info = jpeg_info(img)
+            if not info:
+                continue
+            w, h, comps = info
+            cs = {1: "/DeviceGray", 4: "/DeviceCMYK"}.get(comps, "/DeviceRGB")
+            extra = " /Decode [1 0 1 0 1 0 1 0]" if comps == 4 else ""
+            num = pdf.stream(f"/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace {cs}"
+                             f" /BitsPerComponent 8 /Filter /DCTDecode{extra}", img)
         images[key] = (f"Im{len(images) + 1}", num)
 
     xobjects = " ".join(f"/{name} {num} 0 R" for name, num in images.values())
@@ -250,7 +272,7 @@ def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards 
             x = (left + c * (CARD_W + gap)) * MM
             y = (bottom + (rows - 1 - r) * (CARD_H + gap)) * MM
             w, h = CARD_W * MM, CARD_H * MM
-            if e.get("image") is not None:
+            if e.get("image") is not None and hashlib.sha1(e["image"]).hexdigest() in images:
                 name = images[hashlib.sha1(e["image"]).hexdigest()][0]
                 ops.append(f"q {w:.3f} 0 0 {h:.3f} {x:.3f} {y:.3f} cm /{name} Do Q\n")
             else:
@@ -267,7 +289,7 @@ def build_pdf(entries, paper="a4", cut_marks=True, gap_mm=0.0, title="MTG Cards 
             bops = []
             for i, e in enumerate(chunk):
                 img = e.get("back")
-                if img is None:
+                if img is None or hashlib.sha1(img).hexdigest() not in images:
                     continue
                 c, r = cols - 1 - i % cols, i // cols
                 x = (left + c * (CARD_W + gap)) * MM

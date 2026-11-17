@@ -11,8 +11,8 @@ android {
         applicationId = "de.mtgcards.scanner"
         minSdk = 24
         targetSdk = 34
-        versionCode = 28
-        versionName = "3.3.2"
+        versionCode = 29
+        versionName = "3.4.0"
     }
 
     // Fester (nicht geheimer) Schlüssel, damit Updates aus jedem CI-Build installierbar sind.

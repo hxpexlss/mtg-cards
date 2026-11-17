@@ -10,6 +10,7 @@ import binascii
 import hashlib
 
 from .db import now_iso
+from . import pngimg
 from .proxies import jpeg_info
 
 SCHEMA = """
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS custom_proxies (
 );
 """
 
-MAX_IMAGE = 10 * 1024 * 1024
+MAX_IMAGE = 25 * 1024 * 1024
 _FIELDS = "id, name, notes, quantity, image_hash, width, height, created_at, updated_at"
 
 
@@ -36,7 +37,7 @@ class CustomProxyError(ValueError):
 
 
 def decode_image(value):
-    """Bild aus Bytes, Base64 oder Data-URL ("data:image/jpeg;base64,…"). Nur JPEG."""
+    """Bild aus Bytes, Base64 oder Data-URL ("data:image/png;base64,…"). PNG (verlustfrei) oder JPEG."""
     if isinstance(value, (bytes, bytearray)):
         data = bytes(value)
     else:
@@ -50,10 +51,12 @@ def decode_image(value):
     if not data:
         raise CustomProxyError("Kein Bild angegeben")
     if len(data) > MAX_IMAGE:
-        raise CustomProxyError("Bild ist zu groß (höchstens 10 MB)")
+        raise CustomProxyError("Bild ist zu groß (höchstens 25 MB)")
     info = jpeg_info(data)
+    if not info and pngimg.png_info(data):
+        info = tuple(pngimg.png_info(data)) + (3,)
     if not info:
-        raise CustomProxyError("Bitte ein JPEG-Bild hochladen (Weboberfläche und App wandeln andere Formate um)")
+        raise CustomProxyError("Bitte ein PNG- oder JPEG-Bild hochladen (Weboberfläche und App wandeln andere Formate um)")
     return data, info
 
 
